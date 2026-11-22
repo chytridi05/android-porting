@@ -38,7 +38,7 @@ Assert-Cli @('plan', $javaProject) 0 @(
 )
 Assert-Cli @('inspect', $kotlinProject) 0 @(
     'Gradle settings: settings\.gradle\.kts', 'Android module: :launcher', 'Shared module: :shared',
-    'Detected game entry: fixture\.game\.DemoGame', 'Asset directories:\s+assets/default\s+assets/alternate'
+    'Detected game entry: fixture\.game\.DemoGame', 'Asset directories:\s+assets/default\s+assets/shared'
 )
 Assert-Cli @('plan', $kotlinProject, '--entry', 'fixture.game.AlternateGame', '--asset', 'assets/alternate',
     '--asset', 'assets/default', '--width', '800', '--height', '600') 0 @(

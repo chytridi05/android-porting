@@ -19,7 +19,7 @@ android {
     }
 
     sourceSets.named("main") {
-        assets.setSrcDirs(listOf("../../assets/default", "../../assets/alternate"))
+        assets.setSrcDirs(listOf("../../assets/default", "../../assets/shared"))
     }
 }
 

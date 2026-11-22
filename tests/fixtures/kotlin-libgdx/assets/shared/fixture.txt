@@ -1,0 +1,1 @@
+Shared Android fixture asset.

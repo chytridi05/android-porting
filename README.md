@@ -77,15 +77,42 @@ Gradle Wrapper JAR and streams the build log. `--offline` uses an existing
 Gradle dependency cache after the Wrapper distribution is available. The
 command uses the project and user Gradle settings and Java environment.
 
-To launch a newly generated `:lwjgl3` target, open PowerShell in the output
-directory and run its Gradle Wrapper script.
+To launch a newly generated `:lwjgl3` target, run its desktop task from the
+output directory.
 
 ```powershell
-.\gradlew.bat :lwjgl3:run
+Push-Location -LiteralPath $desktop
+try {
+    & "$env:JAVA_HOME\bin\java.exe" -cp 'gradle/wrapper/gradle-wrapper.jar' org.gradle.wrapper.GradleWrapperMain :lwjgl3:run
+}
+finally {
+    Pop-Location
+}
 ```
 
 For a reused desktop module, substitute its module path from
 `porting-project.json`.
+
+### Windows x64 workflow verification
+
+Run the workflow check from a Windows desktop session with PowerShell 7,
+JDK 21, and the Android SDK described below. Pass an unpatched Tilt Maze
+source directory and a new verification directory. The check uses the same
+Gradle Wrapper files for the included Kotlin fixture. Add `-Offline` after
+the Wrapper distribution and build dependencies have been cached.
+
+```powershell
+.\tests\Test-DesktopWorkflow.ps1 -Cli $cli `
+    -TiltMaze 'C:\path\to\tilt-maze' -WorkDirectory '.local\alpha-verification'
+```
+
+The check verifies a failed copy and a clean retry, preserves an edited
+launcher on a destination conflict, and compares the input file hashes before
+and after the workflow. It builds both generated projects and opens and closes
+their Windows application windows. The Kotlin window title comes from the
+first asset directory in the override order. The verification directory
+retains the editable projects and logs. The offline Windows x64 run used
+Microsoft OpenJDK 21.0.7+6 and Gradle 8.14.3.
 
 ## Tilt Maze Android baseline
 
