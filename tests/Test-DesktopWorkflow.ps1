@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $cliPath = (Resolve-Path -LiteralPath $Cli).Path
 $javaSource = (Resolve-Path -LiteralPath $TiltMaze).Path
+$java = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { (Get-Command java.exe).Source }
 $root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WorkDirectory)
 $relative = [IO.Path]::GetRelativePath($javaSource, $root)
 if ($relative -ne '..' -and !$relative.StartsWith('..\') -and ![IO.Path]::IsPathRooted($relative)) {
@@ -34,7 +35,64 @@ function Get-SourceInventory([string] $Directory) {
     Get-ChildItem -LiteralPath $Directory -Recurse -Force -File | Get-FileHash
 }
 
-function Assert-Launch([string] $Project, [string] $Name, [string] $MainClass, [string] $Title) {
+function Assert-WindowTitle([Diagnostics.Process] $Process, [string] $Title) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        $Process.Refresh()
+        if ($Process.MainWindowTitle -ceq $Title) { return }
+        Start-Sleep -Milliseconds 100
+    } while (!$Process.HasExited -and [DateTime]::UtcNow -lt $deadline)
+
+    throw "Expected the '$Title' application window. See the launch log in '$root'."
+}
+
+function Assert-KotlinPlaythrough([Diagnostics.Process] $Process, [string] $Title) {
+    if (!('Porting.Verification.WindowInput' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace Porting.Verification
+{
+    public static class WindowInput
+    {
+        [DllImport("user32.dll", EntryPoint = "MapVirtualKeyW")]
+        private static extern uint MapVirtualKey(uint key, uint mode);
+
+        [DllImport("user32.dll", EntryPoint = "PostMessageW")]
+        private static extern bool PostMessage(IntPtr window, uint message, IntPtr key, IntPtr flags);
+
+        public static bool Press(IntPtr window, int key)
+        {
+            uint down = 1 | (MapVirtualKey((uint)key, 0) << 16);
+            if (key is >= 0x25 and <= 0x28)
+            {
+                down |= 1u << 24;
+            }
+
+            return PostMessage(window, 0x0100, new IntPtr(key), new IntPtr(down))
+                && PostMessage(window, 0x0101, new IntPtr(key), new IntPtr(down | (3u << 30)));
+        }
+    }
+}
+'@
+    }
+
+    foreach ($key in @(0x27, 0x26, 0x26, 0x26, 0x27, 0x27, 0x27, 0x27)) {
+        if (![Porting.Verification.WindowInput]::Press($Process.MainWindowHandle, $key)) {
+            throw 'Could not deliver a key to the Kotlin desktop window.'
+        }
+        Start-Sleep -Milliseconds 180
+    }
+    Assert-WindowTitle $Process "$Title - YOU WIN"
+    if (![Porting.Verification.WindowInput]::Press($Process.MainWindowHandle, 0x0D)) {
+        throw 'Could not deliver Enter to the Kotlin desktop window.'
+    }
+    Assert-WindowTitle $Process $Title
+    Write-Output 'Kotlin desktop keyboard playthrough reached YOU WIN and replayed.'
+}
+
+function Assert-Launch([string] $Project, [string] $Name, [string] $MainClass, [string] $Title, [switch] $PlayKotlin) {
     $archives = @(Get-ChildItem -LiteralPath (Join-Path $Project 'lwjgl3/build/distributions') -Filter '*.zip' -File)
     if ($archives.Count -ne 1) {
         throw "Expected one LWJGL3 distribution archive in '$Project'."
@@ -47,7 +105,6 @@ function Assert-Launch([string] $Project, [string] $Name, [string] $MainClass, [
         throw "Expected one application directory in '$installed'."
     }
 
-    $java = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { (Get-Command java.exe).Source }
     $start = [Diagnostics.ProcessStartInfo]::new($java)
     $start.WorkingDirectory = $distributions[0].FullName
     $start.UseShellExecute = $false
@@ -62,21 +119,14 @@ function Assert-Launch([string] $Project, [string] $Name, [string] $MainClass, [
     try {
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        $deadline = [DateTime]::UtcNow.AddSeconds(30)
-        do {
-            $process.Refresh()
-            $observed = $process.MainWindowTitle
-            if ($observed -ceq $Title) { break }
-            Start-Sleep -Milliseconds 250
-        } while (!$process.HasExited -and [DateTime]::UtcNow -lt $deadline)
-
-        if ($observed -cne $Title) {
-            throw "Expected the '$Title' application window. See '$Name.log' in '$root'."
+        Assert-WindowTitle $process $Title
+        if ($PlayKotlin) {
+            Assert-KotlinPlaythrough $process $Title
         }
         if (!$process.CloseMainWindow() -or !$process.WaitForExit(10000) -or $process.ExitCode -ne 0) {
             throw "The '$Title' application did not close cleanly. See '$Name.log' in '$root'."
         }
-        Write-Output "Observed and closed window '$observed'."
+        Write-Output "Observed and closed window '$Title'."
     }
     finally {
         if (!$process.HasExited) {
@@ -87,6 +137,22 @@ function Assert-Launch([string] $Project, [string] $Name, [string] $MainClass, [
             $stdout.GetAwaiter().GetResult(), $stderr.GetAwaiter().GetResult()
         ) -Encoding utf8
         $process.Dispose()
+    }
+}
+
+function Assert-Java([string] $Directory, [string[]] $Arguments, [string] $LogName, [string] $ExpectedPattern) {
+    Push-Location -LiteralPath $Directory
+    try {
+        $lines = @(& $java @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    Set-Content -LiteralPath (Join-Path $root $LogName) -Value $lines -Encoding utf8
+    if ($exitCode -ne 0 -or ($lines -join "`n") -cnotmatch $ExpectedPattern) {
+        $tail = ($lines | Select-Object -Last 25) -join "`n"
+        throw "Java exited with code $exitCode. See '$LogName' in '$root'.`n$tail"
     }
 }
 
@@ -132,15 +198,42 @@ if ((Get-FileHash -LiteralPath $launcher).Hash -ne $launcherHash) {
 }
 
 Assert-Cli @('build', $javaSource) 1 'build\.project-metadata'
+$patch = Join-Path $PSScriptRoot '../samples/tilt-maze/windows-desktop.patch'
+$previousCeiling = $env:GIT_CEILING_DIRECTORIES
+try {
+    # Apply the input adaptation in the export, even if it sits below a Git checkout.
+    $env:GIT_CEILING_DIRECTORIES = $root
+    & git -C $javaOutput apply '--include=core/**' -- $patch
+    if ($LASTEXITCODE -ne 0) { throw 'Could not apply the Tilt Maze keyboard input changes.' }
+}
+finally {
+    $env:GIT_CEILING_DIRECTORIES = $previousCeiling
+}
+
 $buildOptions = if ($Offline) { @('--offline') } else { @() }
 Assert-Cli (@('build', $javaOutput) + $buildOptions) 0 'BUILD SUCCESSFUL' 'java-build.log'
 Assert-Launch $javaOutput 'java-launch' 'com.micro1.maze.DesktopLauncher' 'MazeGame'
+$playback = Join-Path $PSScriptRoot 'verification/TiltMazeKeyboardPlayback.java'
+$javaLibraries = Join-Path $root 'java-launch/lwjgl3-1.0/lib/*'
+Assert-Java $javaOutput @('-classpath', $javaLibraries, $playback) 'java-playthrough.log' 'Reached WON[\s\S]*Enter replay reset'
+Write-Output 'Tilt Maze keyboard playback reached WON and replayed.'
 Assert-Cli (@('build', $kotlinOutput) + $buildOptions) 0 'BUILD SUCCESSFUL' 'kotlin-build.log'
-Assert-Launch $kotlinOutput 'kotlin-launch' 'fixture.game.DesktopLauncher' 'Kotlin fixture alternate assets'
+Assert-Launch $kotlinOutput 'kotlin-launch' 'fixture.game.DesktopLauncher' 'Kotlin fixture alternate assets' -PlayKotlin
+
+$wrapper = @('-Dfile.encoding=UTF-8', '-classpath', 'gradle/wrapper/gradle-wrapper.jar',
+    'org.gradle.wrapper.GradleWrapperMain', '--console=plain', '--no-daemon') + $buildOptions
+Assert-Java $javaOutput ($wrapper + @(':core:test', ':android:assembleDebug')) 'java-android.log' 'BUILD SUCCESSFUL'
+Assert-Java $kotlinOutput ($wrapper + ':launcher:assembleDebug') 'kotlin-android.log' 'BUILD SUCCESSFUL'
+foreach ($apk in @(
+    (Join-Path $javaOutput 'android/build/outputs/apk/debug/android-debug.apk'),
+    (Join-Path $kotlinOutput 'platform/android/build/outputs/apk/debug/launcher-debug.apk')
+)) {
+    if (!(Test-Path -LiteralPath $apk -PathType Leaf)) { throw "Expected a debug APK at '$apk'." }
+}
 
 $after = @(Get-SourceInventory $javaSource) + @(Get-SourceInventory $kotlinSource)
 if (@(Compare-Object $before $after -Property Path, Hash).Count -gt 0) {
     throw 'Generation or build modified the input projects.'
 }
 
-Write-Output "Windows desktop generation, retry, conflict, build, and launch checks passed. Logs are under '$root'."
+Write-Output "Windows generation, playthrough, and Android regression builds passed. Logs are under '$root'."
