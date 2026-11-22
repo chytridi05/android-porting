@@ -47,4 +47,27 @@ starts, resets, or replays the game, and the accelerometer drives the Box2D
 simulation. The shared game draws the maze and interface in code, so the sample
 is asset-free.
 
+## Tilt Maze Windows desktop port
+
+Apply the [desktop patch](samples/tilt-maze/windows-desktop.patch) from the
+root of a fresh Git checkout of the pinned Tilt Maze revision. Use the same
+JDK and Android SDK setup as the Android baseline. Set `$patch` to the
+absolute path to the patch in this repository.
+
+```powershell
+$patch = 'C:\path\to\android-porting\samples\tilt-maze\windows-desktop.patch'
+git apply $patch
+.\gradlew.bat :lwjgl3:build
+.\gradlew.bat :lwjgl3:run
+```
+
+The `lwjgl3` module launches the existing game at 1280 × 720 and loads the
+desktop libGDX and Box2D natives. In the Windows window, press Enter to start
+or replay, hold the arrow keys to tilt the maze, and press R to reset the
+ball during play. Android continues to use the accelerometer and touch.
+
+On Windows x64, the desktop target built and opened the game window. The
+patched project also passed all 12 shared tests and rebuilt the Android debug
+APK.
+
 See [AGENTS.md](AGENTS.md) for development and review conventions.

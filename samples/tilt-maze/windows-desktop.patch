@@ -1,0 +1,149 @@
+diff --git a/settings.gradle b/settings.gradle
+index 9e30dc8..07bf491 100644
+--- a/settings.gradle
++++ b/settings.gradle
+@@ -1,2 +1,3 @@
+ rootProject.name = 'Maze'
+ include 'core', 'android'
++include 'lwjgl3'
+diff --git a/core/src/main/java/com/micro1/maze/TitleScreen.java b/core/src/main/java/com/micro1/maze/TitleScreen.java
+index 8fa31fa..48241d6 100644
+--- a/core/src/main/java/com/micro1/maze/TitleScreen.java
++++ b/core/src/main/java/com/micro1/maze/TitleScreen.java
+@@ -1,5 +1,7 @@
+ package com.micro1.maze;
+
++import com.badlogic.gdx.Application.ApplicationType;
++import com.badlogic.gdx.Input.Keys;
+ import com.badlogic.gdx.Gdx;
+ import com.badlogic.gdx.ScreenAdapter;
+ import com.badlogic.gdx.graphics.Color;
+@@ -37,7 +39,9 @@ public class TitleScreen extends ScreenAdapter {
+
+     @Override
+     public void render(float delta) {
+-        if (Gdx.input.justTouched()) {
++        boolean desktop = Gdx.app.getType() == ApplicationType.Desktop;
++        boolean start = desktop ? Gdx.input.isKeyJustPressed(Keys.ENTER) : Gdx.input.justTouched();
++        if (start) {
+             // Game.setScreen only calls hide() on the outgoing screen, never dispose(), and
+             // nothing ever routes back to the title screen, so this screen must free its own
+             // GL resources (batch + fonts) here or they leak for the rest of the app's lifetime.
+@@ -55,7 +59,8 @@ public class TitleScreen extends ScreenAdapter {
+         float centerX = MazeGame.VIRTUAL_WIDTH / 2f;
+         float centerY = MazeGame.VIRTUAL_HEIGHT / 2f;
+         FontUtil.drawCentered(batch, titleFont, layout, "MAZE", centerX, centerY);
+-        FontUtil.drawCentered(batch, promptFont, layout, "TAP TO START", centerX, centerY - 50f);
++        String startPrompt = desktop ? "ENTER TO START" : "TAP TO START";
++        FontUtil.drawCentered(batch, promptFont, layout, startPrompt, centerX, centerY - 50f);
+         batch.end();
+     }
+
+diff --git a/core/src/main/java/com/micro1/maze/SandboxScreen.java b/core/src/main/java/com/micro1/maze/SandboxScreen.java
+index 8f402b0..20bf58e 100644
+--- a/core/src/main/java/com/micro1/maze/SandboxScreen.java
++++ b/core/src/main/java/com/micro1/maze/SandboxScreen.java
+@@ -1,5 +1,7 @@
+ package com.micro1.maze;
+
++import com.badlogic.gdx.Application.ApplicationType;
++import com.badlogic.gdx.Input.Keys;
+ import com.badlogic.gdx.Gdx;
+ import com.badlogic.gdx.ScreenAdapter;
+ import com.badlogic.gdx.graphics.Color;
+@@ -52,14 +54,28 @@ public class SandboxScreen extends ScreenAdapter {
+
+     @Override
+     public void render(float delta) {
+-        float tiltX = Gdx.input.getAccelerometerX();
+-        float tiltY = Gdx.input.getAccelerometerY();
++        boolean desktop = Gdx.app.getType() == ApplicationType.Desktop;
++        float tiltX;
++        float tiltY;
++        if (desktop) {
++            float keyTilt = 2f;
++            tiltX = (Gdx.input.isKeyPressed(Keys.RIGHT) ? keyTilt : 0f)
++                    - (Gdx.input.isKeyPressed(Keys.LEFT) ? keyTilt : 0f);
++            tiltY = (Gdx.input.isKeyPressed(Keys.UP) ? keyTilt : 0f)
++                    - (Gdx.input.isKeyPressed(Keys.DOWN) ? keyTilt : 0f);
++        } else {
++            tiltX = Gdx.input.getAccelerometerX();
++            tiltY = Gdx.input.getAccelerometerY();
++        }
+         world.update(delta, tiltX, tiltY);
+
+-        if (Gdx.input.justTouched()) {
+-            if (world.getState() == MazeWorld.State.PLAYING) {
++        MazeWorld.State state = world.getState();
++        int actionKey = state == MazeWorld.State.WON ? Keys.ENTER : Keys.R;
++        boolean actionPressed = desktop ? Gdx.input.isKeyJustPressed(actionKey) : Gdx.input.justTouched();
++        if (actionPressed) {
++            if (state == MazeWorld.State.PLAYING) {
+                 world.resetBallOnly();
+-            } else if (world.getState() == MazeWorld.State.WON) {
++            } else if (state == MazeWorld.State.WON) {
+                 world.resetGame();
+             }
+         }
+@@ -108,7 +124,7 @@ public class SandboxScreen extends ScreenAdapter {
+         hudFont.draw(batch, layout, HUD_MARGIN_PX, hudBaselineY + hudFont.getCapHeight());
+
+         hudFont.setColor(LIGHT_GREY);
+-        layout.setText(hudFont, "TAP TO RESET");
++        layout.setText(hudFont, desktop ? "ARROW KEYS / R TO RESET" : "TAP TO RESET");
+         hudFont.draw(batch, layout, MazeGame.VIRTUAL_WIDTH - HUD_MARGIN_PX - layout.width, hudBaselineY + hudFont.getCapHeight());
+
+         float fieldCenterX = MazeWorld.PLAYFIELD_WIDTH_PX / 2f;
+@@ -120,7 +136,8 @@ public class SandboxScreen extends ScreenAdapter {
+             bigMessageFont.setColor(Color.WHITE);
+             FontUtil.drawCentered(batch, bigMessageFont, layout, "YOU WIN", fieldCenterX, fieldCenterY);
+             promptFont.setColor(Color.WHITE);
+-            FontUtil.drawCentered(batch, promptFont, layout, "TAP TO PLAY AGAIN", fieldCenterX, fieldCenterY - 60f);
++            String replayPrompt = desktop ? "ENTER TO PLAY AGAIN" : "TAP TO PLAY AGAIN";
++            FontUtil.drawCentered(batch, promptFont, layout, replayPrompt, fieldCenterX, fieldCenterY - 60f);
+         }
+         batch.end();
+     }
+diff --git a/lwjgl3/build.gradle b/lwjgl3/build.gradle
+new file mode 100644
+index 0000000..cd937fb
+--- /dev/null
++++ b/lwjgl3/build.gradle
+@@ -0,0 +1,14 @@
++plugins {
++    id 'application'
++}
++
++dependencies {
++    implementation project(':core')
++    implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
++    runtimeOnly "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
++    runtimeOnly "com.badlogicgames.gdx:gdx-box2d-platform:$gdxVersion:natives-desktop"
++}
++
++application {
++    mainClass = 'com.micro1.maze.DesktopLauncher'
++}
+diff --git a/lwjgl3/src/main/java/com/micro1/maze/DesktopLauncher.java b/lwjgl3/src/main/java/com/micro1/maze/DesktopLauncher.java
+new file mode 100644
+index 0000000..581995a
+--- /dev/null
++++ b/lwjgl3/src/main/java/com/micro1/maze/DesktopLauncher.java
+@@ -0,0 +1,17 @@
++package com.micro1.maze;
++
++import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
++import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
++
++public final class DesktopLauncher {
++    private DesktopLauncher() {
++    }
++
++    public static void main(String[] args) {
++        Lwjgl3ApplicationConfiguration configuration = new Lwjgl3ApplicationConfiguration();
++        configuration.setTitle("Tilt Maze");
++        configuration.setWindowedMode(1280, 720);
++        configuration.useVsync(true);
++        new Lwjgl3Application(new MazeGame(), configuration);
++    }
++}
