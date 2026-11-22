@@ -62,6 +62,31 @@ configuration must be available to the new module. Project-specific input
 and platform API adaptations are edits to make in the output copy. For Tilt
 Maze, the two input changes are in the Windows desktop patch below.
 
+## Build and launch the desktop target
+
+Set `JAVA_HOME` to a JDK supported by your project's Gradle Wrapper. Set
+`ANDROID_HOME` if the project's Android plugin configuration requires an SDK.
+Run `build` against the output directory from `generate`.
+
+```powershell
+& $cli build $desktop
+```
+
+`build` runs the desktop module's `build` task through the output project's
+Gradle Wrapper JAR and streams the build log. `--offline` uses an existing
+Gradle dependency cache after the Wrapper distribution is available. The
+command uses the project and user Gradle settings and Java environment.
+
+To launch a newly generated `:lwjgl3` target, open PowerShell in the output
+directory and run its Gradle Wrapper script.
+
+```powershell
+.\gradlew.bat :lwjgl3:run
+```
+
+For a reused desktop module, substitute its module path from
+`porting-project.json`.
+
 ## Tilt Maze Android baseline
 
 The `0.0.1` manual port uses Elia Youssef's MIT-licensed Tilt Maze at revision

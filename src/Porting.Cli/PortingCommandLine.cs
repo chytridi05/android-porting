@@ -1,4 +1,5 @@
 using Porting.Core;
+using Porting.Core.Building;
 using Porting.Core.Generation;
 using Porting.Core.Inspection;
 using Porting.Core.Planning;
@@ -7,7 +8,8 @@ using System.Globalization;
 namespace Porting.Cli
 {
     /// <summary>Dispatches CLI commands and formats shared porting results for the console.</summary>
-    internal sealed class PortingCommandLine(IProjectInspector inspector, IPortPlanner planner, IDesktopProjectGenerator generator)
+    internal sealed class PortingCommandLine(IProjectInspector inspector, IPortPlanner planner,
+        IDesktopProjectGenerator generator, IDesktopProjectBuilder builder)
     {
         private const int OperationFailed = 1;
         private const int InvalidArguments = 2;
@@ -25,7 +27,7 @@ namespace Porting.Cli
             try
             {
                 string command = args[0];
-                if (command is not ("inspect" or "plan" or "generate"))
+                if (command is not ("inspect" or "plan" or "generate" or "build"))
                 {
                     throw new FormatException($"Unknown command '{command}'.");
                 }
@@ -34,6 +36,11 @@ namespace Porting.Cli
                 {
                     WriteHelp(command);
                     return 0;
+                }
+
+                if (command == "build")
+                {
+                    return await RunBuildAsync(args, cancellationToken);
                 }
 
                 string source = ReadDirectory(args, 1, "source project");
@@ -84,6 +91,26 @@ namespace Porting.Cli
                 Console.Error.WriteLine(exception.Message);
                 return OperationFailed;
             }
+        }
+
+        private async Task<int> RunBuildAsync(string[] args, CancellationToken cancellationToken)
+        {
+            string project = ReadDirectory(args, 1, "generated project");
+            bool offline = args.Length > 2 && args[2] == "--offline";
+            int expected = offline ? 3 : 2;
+            if (args.Length > expected)
+            {
+                throw new FormatException($"Unexpected argument '{args[expected]}'.");
+            }
+
+            BuildResult build = await builder.BuildAsync(project, offline, Console.Out, Console.Error, cancellationToken);
+            int exitCode = WriteDiagnostics(build.Diagnostics);
+            if (exitCode == 0)
+            {
+                Console.WriteLine($"Built {build.DesktopModule} in {build.ProjectDirectory}");
+            }
+
+            return exitCode;
         }
 
         private static string ReadDirectory(string[] args, int index, string name)
@@ -182,6 +209,11 @@ namespace Porting.Cli
                 Console.WriteLine("  Porting.Cli generate <source-directory> <output-directory> [options]");
             }
 
+            if (command is null or "build")
+            {
+                Console.WriteLine("  Porting.Cli build <output-directory> [--offline]");
+            }
+
             if (command is null or "plan" or "generate")
             {
                 Console.WriteLine();
@@ -198,6 +230,11 @@ namespace Porting.Cli
             if (command is null or "generate")
             {
                 Console.WriteLine("Generate requires a new output directory separate from the input.");
+            }
+
+            if (command is null or "build")
+            {
+                Console.WriteLine("Build uses the generated project's Gradle Wrapper. Use --offline to resolve dependencies from the Gradle cache.");
             }
 
             Console.WriteLine("Exit codes: 0 success, 1 operation failed, 2 invalid arguments, 130 canceled.");
