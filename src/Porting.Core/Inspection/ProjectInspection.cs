@@ -1,5 +1,6 @@
 namespace Porting.Core.Inspection;
 
+/// <summary>Contains the detected Gradle and libGDX project metadata.</summary>
 /// <param name="SourceDirectory">The absolute path of the inspected project.</param>
 /// <param name="GradleSettingsFile">The project-relative path to the Gradle settings file, when found.</param>
 /// <param name="GradleVersion">The Gradle Wrapper version, when detected.</param>

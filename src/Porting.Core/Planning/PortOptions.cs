@@ -1,5 +1,6 @@
 namespace Porting.Core.Planning;
 
+/// <summary>Overrides the detected game entry and assets or the default window dimensions.</summary>
 /// <param name="GameEntryType">A fully qualified JVM type name that takes precedence over the detected entry point.</param>
 /// <param name="AssetDirectories">Project-relative asset directories that replace the detected directories when supplied.</param>
 /// <param name="WindowWidth">An optional initial window width in pixels.</param>

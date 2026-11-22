@@ -4,6 +4,7 @@
 
 - Use Chinese for chat, design discussions, and review handoffs.
 - Use English for source code identifiers and comments.
+- Add brief XML documentation to public C# types and members and to internal contracts that need explanation. Use `<summary>` for the purpose and add `<param>`, `<returns>`, or `<exception>` when they clarify caller behavior. Use `<inheritdoc />` for implementations that follow a documented contract.
 - Follow `.editorconfig` for C# naming and formatting. The conventions come from `C:\dev\mod\inscryption\!!!3D_RENDERER\AGENTS.md` and its `.editorconfig`.
 
 ## Project scope

@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace Porting.Core.Planning;
 
+/// <summary>Applies overrides to inspection results and previews the desktop project changes.</summary>
 public sealed class PortPlanner : IPortPlanner
 {
     private const int DefaultWindowWidth = 1280;
@@ -10,6 +11,7 @@ public sealed class PortPlanner : IPortPlanner
     private const string DefaultDesktopModule = ":lwjgl3";
     private const string JvmIdentifier = @"[\p{L}_$][\p{L}\p{N}\p{M}_$]*";
 
+    /// <inheritdoc />
     public PortPlan CreatePlan(ProjectInspection inspection, PortOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(inspection);

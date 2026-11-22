@@ -2,6 +2,7 @@ using Porting.Core.Inspection;
 
 namespace Porting.Core.Planning;
 
+/// <summary>Describes a proposed Windows desktop target for the inspected source project.</summary>
 /// <param name="Inspection">The inspection result used to plan the port.</param>
 /// <param name="DesktopModulePath">The planned Gradle project path of the desktop module.</param>
 /// <param name="GameEntryType">The resolved JVM game entry type, when available.</param>

@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace Porting.Core.Inspection;
 
+/// <summary>Reads Gradle settings, build scripts, and JVM source files to identify a libGDX project.</summary>
 public sealed class GradleProjectInspector : IProjectInspector
 {
     private const string QuotedString = "(?<quote>['\"])(?<value>[^'\"\r\n]*)\\k<quote>";
@@ -12,6 +13,7 @@ public sealed class GradleProjectInspector : IProjectInspector
     private const string ProjectPath = @"\bproject\s*\(\s*" + QuotedString + @"\s*\)";
     private static readonly Regex CommentsAndStrings = new(""""(?<string>"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|//[^\r\n]*|/\*[\s\S]*?\*/"""", RegexOptions.CultureInvariant);
 
+    /// <inheritdoc />
     public async Task<ProjectInspection> InspectAsync(string sourceDirectory, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
@@ -191,6 +193,7 @@ public sealed class GradleProjectInspector : IProjectInspector
             : File.Exists(Path.Combine(directory, kotlin)) ? kotlin : null;
     }
 
+    /// <summary>Masks comments and optionally string literals while preserving source line numbers.</summary>
     private static async Task<string> ReadCodeAsync(string path, CancellationToken cancellationToken, bool keepStrings = true)
     {
         string text = await File.ReadAllTextAsync(path, cancellationToken);
@@ -282,6 +285,7 @@ public sealed class GradleProjectInspector : IProjectInspector
         return directories.Where(path => Directory.Exists(Path.Combine(root, path))).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
+    /// <summary>Resolves a path from the given base directory if it stays inside the project.</summary>
     private static string? ProjectRelativePath(string root, string baseDirectory, string path)
     {
         if (string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path) || path.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
@@ -293,6 +297,7 @@ public sealed class GradleProjectInspector : IProjectInspector
         return relative == ".." || relative.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(relative) ? null : relative;
     }
 
+    /// <summary>Matches Android launcher initialization calls to types declared in the shared module.</summary>
     private static async Task<string?> FindGameEntryAsync(string root, GradleModule android, GradleModule shared,
         List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
     {

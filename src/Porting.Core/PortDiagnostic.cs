@@ -1,5 +1,6 @@
 namespace Porting.Core;
 
+/// <summary>Describes a finding from project inspection or port planning.</summary>
 /// <param name="Code">A stable diagnostic identifier.</param>
 /// <param name="Severity">The effect of the diagnostic on the port.</param>
 /// <param name="Message">A human-readable explanation.</param>
