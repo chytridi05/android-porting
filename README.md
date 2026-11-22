@@ -7,26 +7,35 @@ The C# / .NET 10 CLI generates a Gradle project with an LWJGL3 desktop target
 and reports compatibility issues. Build and packaging are separate from generation.
 A WPF desktop interface will follow using the same porting core.
 
-Open `android-porting.slnx` in Visual Studio or run
-`dotnet build android-porting.slnx` with the .NET 10 SDK. The solution contains
-the CLI entry point and the shared core library.
+## Windows x64 quickstart
 
-## Inspect and plan a source project
+Extract `android-porting-v0.1.0-win-x64.zip` on Windows x64. The CLI ZIP
+includes the .NET runtime. Use a compatible JDK to build and package the
+game project. Android plugin configuration may also require an Android SDK.
 
-Build the CLI and pass the directory that contains `settings.gradle` or
-`settings.gradle.kts`. These commands read project files without running Gradle.
+Pass the directory that contains `settings.gradle` or `settings.gradle.kts`.
+Choose a new output directory for the editable copy.
 
 ```powershell
-dotnet build android-porting.slnx -c Release -p:Platform=x64
-$cli = Resolve-Path 'src/Porting.Cli/bin/x64/Release/net10.0-windows/Porting.Cli.exe'
+$cli = 'C:\path\to\android-porting-v0.1.0-win-x64\Porting.Cli.exe'
 $source = 'C:\path\to\libgdx-project'
+$desktop = 'C:\path\to\new-desktop-project'
+& $cli --version
 & $cli inspect $source
 & $cli plan $source
+& $cli generate $source $desktop
+```
+
+`inspect` prints the detected modules, launcher, and asset paths without
+running Gradle. `plan` previews the desktop target, proposed file changes,
+and Gradle tasks. Edit the generated copy before running `build` or `package`.
+
+### Inspect and plan with overrides
+
+```powershell
 & $cli plan $source --entry com.example.MyGame --asset assets --width 1280 --height 720
 ```
 
-`inspect` prints the detected modules, launcher, and asset paths. `plan`
-previews the desktop target, proposed file changes, and Gradle build tasks.
 Use repeated `--asset` options to set the search order or `--no-assets` for an
 empty list. A blocking diagnostic exits with code 1. Invalid command arguments
 exit with code 2. `--help` lists the available options.
@@ -145,6 +154,25 @@ only Windows system tools on `PATH`.
 ```powershell
 .\tests\Test-Package.ps1 -Cli $cli -Project $desktop -WindowTitle 'MazeGame' `
     -WorkDirectory '.local\package-verification'
+```
+
+## Build the CLI from source
+
+Open `android-porting.slnx` in Visual Studio or build it with the .NET 10 SDK.
+The solution contains the CLI entry point and the shared core library.
+
+```powershell
+dotnet build android-porting.slnx -c Release -p:Platform=x64
+$cli = Resolve-Path 'src/Porting.Cli/bin/x64/Release/net10.0-windows/Porting.Cli.exe'
+```
+
+Publish the self-contained Windows x64 CLI and ZIP the publish directory's
+contents to reproduce the release artifact.
+
+```powershell
+dotnet publish src/Porting.Cli/Porting.Cli.csproj -c Release -r win-x64 `
+    --self-contained true -o artifacts/win-x64
+Compress-Archive -Path 'artifacts/win-x64/*' -DestinationPath 'artifacts/android-porting-v0.1.0-win-x64.zip'
 ```
 
 ## Tilt Maze Android baseline

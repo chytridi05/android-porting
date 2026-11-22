@@ -5,6 +5,7 @@ using Porting.Core.Inspection;
 using Porting.Core.Packaging;
 using Porting.Core.Planning;
 using System.Globalization;
+using System.Reflection;
 
 namespace Porting.Cli
 {
@@ -22,6 +23,12 @@ namespace Porting.Cli
             if (args is [] or ["help" or "--help" or "-h"])
             {
                 WriteHelp();
+                return 0;
+            }
+            if (args is ["--version"])
+            {
+                string? version = typeof(PortingCommandLine).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+                Console.WriteLine($"Porting.Cli {version}");
                 return 0;
             }
 
@@ -221,6 +228,10 @@ namespace Porting.Cli
         private static void WriteHelp(string? command = null)
         {
             Console.WriteLine("Usage:");
+            if (command is null)
+            {
+                Console.WriteLine("  Porting.Cli --version");
+            }
             if (command is null or "inspect")
             {
                 Console.WriteLine("  Porting.Cli inspect <source-directory>");
