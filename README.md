@@ -66,8 +66,28 @@ desktop libGDX and Box2D natives. In the Windows window, press Enter to start
 or replay, hold the arrow keys to tilt the maze, and press R to reset the
 ball during play. Android continues to use the accelerometer and touch.
 
-On Windows x64, the desktop target built and opened the game window. The
-patched project also passed all 12 shared tests and rebuilt the Android debug
-APK.
+### Windows validation
+
+The committed patch was applied to a fresh copy of the pinned source and built
+on Windows x64. All 12 shared tests passed, and the Android debug APK rebuilt.
+Pressing Enter started the maze, and a keyboard playthrough reached the
+`YOU WIN` screen with the `ENTER TO PLAY AGAIN` prompt.
+
+A Windows LWJGL3 integration run fed held-key states to the game input API
+frame by frame. It verified movement and reset, traversed the maze to `WON`,
+and used Enter to replay from the starting position.
+
+### Inspection and generation findings
+
+- Read `settings.gradle` and the Android module dependencies to identify
+  `:android` and its shared `:core` module. The Android launcher's call to
+  `initialize(new MazeGame(), config)` identifies `com.micro1.maze.MazeGame`.
+  An empty list of asset directories is valid for this project.
+- Add an `:lwjgl3` application module that depends on `:core` and registers its
+  launcher as the Gradle main class. Box2D needs its own desktop native JAR in
+  addition to the libGDX desktop natives.
+- Adapt input at both screens. `TitleScreen` handles starting the game, and
+  `SandboxScreen` maps keyboard input to the existing `MazeWorld` tilt and
+  reset methods. Support touch and accelerometer input on the Android backend.
 
 See [AGENTS.md](AGENTS.md) for development and review conventions.
