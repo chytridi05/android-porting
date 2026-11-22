@@ -14,6 +14,23 @@
 - Work in an output copy of the input project. Generate a Gradle desktop target with LWJGL3, retain the shared Java or Kotlin source, and report compatibility issues. Provide build and packaging commands separately.
 - For `0.0.1`, validate a manual Windows port using a publicly licensed Android-only libGDX game.
 
+## Release roadmap
+
+Use the following milestone order and acceptance criteria. Review changes to the roadmap with the maintainer.
+
+| Version | Milestone and acceptance criteria |
+| --- | --- |
+| `0.0.1` | Record the Android baseline and complete a manual Windows x64 port of Tilt Maze. Verify keyboard controls and one complete playthrough. Record the changes needed for inspection and generation. |
+| `0.1.0-alpha.1` | Deliver `inspect` and `plan` for Gradle libGDX source projects. Verify module and asset detection, explicit overrides, and actionable diagnostics on Java and Kotlin inputs. |
+| `0.1.0-alpha.2` | Deliver `generate` and `build`. Generate an editable desktop project in a separate directory, build and launch it, and verify clean retries and conflict reporting. |
+| `0.1.0-beta.1` | Build and play Java and Kotlin fixtures with different project layouts. Verify Android regression builds and diagnostic behavior for unsupported inputs. |
+| `0.1.0` | Release the Windows x64 CLI. Verify the quickstart, an editable project export, and a `package` ZIP with a bundled Java runtime on clean Windows. |
+| `0.2.0` | Release the WPF desktop tool with the shared core. Verify that both surfaces produce equivalent plans and results for the same input. |
+| `0.3.0` | Expand libGDX layout coverage and ship one reusable desktop adaptation validated on two independent projects. |
+| `0.4.0` | Add APK inspection for authorized inputs. Report package metadata, assets, code and native library inventory, and evidence relevant to porting. |
+| `0.5.0` | Pilot a source-based port for one maintainer-approved Android application stack beyond libGDX. Validate a complete application workflow on Windows. |
+| `1.0.0` | Stabilize the Windows x64 support matrix and the CLI, configuration, and diagnostics contracts. Verify the documented workflow on at least two external projects. |
+
 ## Interface review
 
 - For a new or changed class interface, propose the affected member signatures, including relevant internal signatures, before writing their implementations. Put the signature changes in the working tree when the interface can be reviewed there.
