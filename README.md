@@ -120,6 +120,33 @@ APKs from the generated projects. The verification directory retains the
 editable projects and logs. The offline Windows x64 run used Microsoft OpenJDK
 21.0.7+6 and Gradle 8.14.3.
 
+## Package a Windows x64 game
+
+Set `JAVA_HOME` to a Windows x64 JDK with `jlink` and its `jmods` directory.
+Use an editable project produced by `generate` with a classpath-based Gradle
+application module. Run `package` after making any game-specific adaptations.
+
+```powershell
+$zip = 'C:\path\to\game-win-x64.zip'
+& $cli package $desktop $zip
+```
+
+`package` runs the selected module's `installDist` task and creates a new ZIP
+containing the application, its dependencies, and a Java runtime built from
+the configured JDK. Add `--offline` to use an existing Gradle distribution
+and dependency cache. Extract the entire ZIP on Windows x64 and run
+`Launch.cmd`. The launcher uses the Java executable inside the extracted ZIP.
+
+To check packaging, pass a generated project and its expected window title.
+The test verifies a failed attempt and retry, protection of an existing ZIP,
+and launch from an extracted directory with an isolated user environment and
+only Windows system tools on `PATH`.
+
+```powershell
+.\tests\Test-Package.ps1 -Cli $cli -Project $desktop -WindowTitle 'MazeGame' `
+    -WorkDirectory '.local\package-verification'
+```
+
 ## Tilt Maze Android baseline
 
 The `0.0.1` manual port uses Elia Youssef's MIT-licensed Tilt Maze at revision
