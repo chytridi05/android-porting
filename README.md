@@ -11,6 +11,35 @@ Open `android-porting.slnx` in Visual Studio or run
 `dotnet build android-porting.slnx` with the .NET 10 SDK. The solution contains
 the CLI entry point and the shared core library.
 
+## Inspect and plan a source project
+
+Build the CLI and pass the directory that contains `settings.gradle` or
+`settings.gradle.kts`. These commands read project files without running Gradle.
+
+```powershell
+dotnet build android-porting.slnx -c Release -p:Platform=x64
+$cli = Resolve-Path 'src/Porting.Cli/bin/x64/Release/net10.0-windows/Porting.Cli.exe'
+$source = 'C:\path\to\libgdx-project'
+& $cli inspect $source
+& $cli plan $source
+& $cli plan $source --entry com.example.MyGame --asset assets --width 1280 --height 720
+```
+
+`inspect` prints the detected modules, launcher, and asset paths. `plan`
+previews the desktop target, proposed file changes, and Gradle build tasks.
+Use repeated `--asset` options to set the search order or `--no-assets` for an
+empty list. A blocking diagnostic exits with code 1. Invalid command arguments
+exit with code 2. `--help` lists the available options.
+
+To repeat the Java and Kotlin inspection and planning checks in PowerShell 7,
+point `-TiltMaze` to an **unpatched** copy of the pinned source described below.
+The Kotlin fixture and its mapped modules and asset directories are included
+under `tests/fixtures/kotlin-libgdx`.
+
+```powershell
+.\tests\Test-InspectPlan.ps1 -Cli $cli -TiltMaze 'C:\path\to\tilt-maze'
+```
+
 ## Tilt Maze Android baseline
 
 The `0.0.1` manual port uses Elia Youssef's MIT-licensed Tilt Maze at revision
