@@ -1,4 +1,5 @@
 plugins {
+    `java-library`
     kotlin("jvm")
 }
 
@@ -7,5 +8,5 @@ kotlin {
 }
 
 dependencies {
-    implementation("com.badlogicgames.gdx:gdx:1.14.1")
+    api("com.badlogicgames.gdx:gdx:1.14.1")
 }
