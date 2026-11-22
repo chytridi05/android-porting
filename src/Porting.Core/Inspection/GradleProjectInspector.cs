@@ -11,6 +11,7 @@ public sealed class GradleProjectInspector : IProjectInspector
     private const string JvmName = JvmIdentifier + @"(?:\." + JvmIdentifier + ")*";
     private const string ModuleName = @"\A:?[\w.-]+(?::[\w.-]+)*\z";
     private const string ProjectPath = @"\bproject\s*\(\s*" + QuotedString + @"\s*\)";
+    private const string LibraryVersion = @"[0-9][A-Za-z0-9._-]*";
     private static readonly Regex CommentsAndStrings = new(""""(?<string>"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|//[^\r\n]*|/\*[\s\S]*?\*/"""", RegexOptions.CultureInvariant);
 
     /// <inheritdoc />
@@ -27,6 +28,7 @@ public sealed class GradleProjectInspector : IProjectInspector
         GradleModule? android = null;
         GradleModule? shared = null;
         GradleModule? desktop = null;
+        DesktopLibraryVersions? desktopLibraries = null;
         List<PortDiagnostic> diagnostics = [];
 
         try
@@ -94,6 +96,11 @@ public sealed class GradleProjectInspector : IProjectInspector
 
                     if (shared is not null)
                     {
+                        if (desktop is null)
+                        {
+                            desktopLibraries = await ReadDesktopLibrariesAsync(root, shared, cancellationToken);
+                        }
+
                         gameEntry = await FindGameEntryAsync(root, android, shared, diagnostics, cancellationToken);
                         if (gameEntry is null)
                         {
@@ -110,7 +117,56 @@ public sealed class GradleProjectInspector : IProjectInspector
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        return new(root, settingsFile, gradleVersion, android?.ProjectPath, shared?.ProjectPath, desktop?.ProjectPath, gameEntry, Array.AsReadOnly(assets), diagnostics.AsReadOnly());
+        return new(root, settingsFile, gradleVersion, android?.ProjectPath, shared?.ProjectPath, desktop?.ProjectPath, gameEntry,
+            Array.AsReadOnly(assets), diagnostics.AsReadOnly()) { DesktopLibraries = desktopLibraries };
+    }
+
+    private static async Task<DesktopLibraryVersions> ReadDesktopLibrariesAsync(string root, GradleModule shared, CancellationToken cancellationToken)
+    {
+        const string dependency = """\b(?:api|implementation|runtimeOnly)\s*\(?\s*(?<quote>['"])com\.badlogicgames\.gdx:(?<artifact>gdx|gdx-box2d):(?<version>[^'"\r\n]+)\k<quote>""";
+        Match[] dependencies = Regex.Matches(shared.Script, dependency).ToArray();
+        string build = "";
+        string properties = "";
+        if (dependencies.Any(static match => match.Groups["version"].Value.StartsWith('$')))
+        {
+            string? buildFile = FindScript(root, "build");
+            build = buildFile is null ? "" : await ReadCodeAsync(Path.Combine(root, buildFile), cancellationToken);
+            string propertiesFile = Path.Combine(root, "gradle.properties");
+            properties = File.Exists(propertiesFile) ? await File.ReadAllTextAsync(propertiesFile, cancellationToken) : "";
+        }
+
+        Match[] box2d = dependencies.Where(static match => match.Groups["artifact"].Value == "gdx-box2d").ToArray();
+        return new(ResolveLibraryVersion(dependencies.Where(static match => match.Groups["artifact"].Value == "gdx"), shared.Script, build, properties),
+            box2d.Length > 0, ResolveLibraryVersion(box2d, shared.Script, build, properties));
+    }
+
+    private static string? ResolveLibraryVersion(IEnumerable<Match> dependencies, string sharedScript, string rootScript, string properties)
+    {
+        string?[] versions = dependencies.Select(match =>
+        {
+            string version = match.Groups["version"].Value;
+            if (Regex.IsMatch(version, @"\A" + LibraryVersion + @"\z"))
+            {
+                return version;
+            }
+
+            const string propertyName = @"[A-Za-z_][A-Za-z0-9_]*";
+            Match reference = Regex.Match(version, @"\A\$(?:\{(?<name>" + propertyName + @")\}|(?<name>" + propertyName + @"))\z");
+            if (!reference.Success || match.Groups["quote"].Value != "\"")
+            {
+                return null;
+            }
+
+            string name = Regex.Escape(reference.Groups["name"].Value);
+            string scriptAssignment = """\b""" + name + """\s*=\s*['"](?<value>""" + LibraryVersion + """)['"]""";
+            string propertyAssignment = @"(?m)^[ \t]*" + name + @"[ \t]*[:=][ \t]*(?<value>" + LibraryVersion + @")[ \t]*\r?$";
+            string[] values = Regex.Matches(sharedScript + "\n" + rootScript, scriptAssignment)
+                .Concat(Regex.Matches(properties, propertyAssignment))
+                .Select(static assignment => assignment.Groups["value"].Value).Distinct(StringComparer.Ordinal).ToArray();
+            return values is [string resolved] ? resolved : null;
+        }).Distinct(StringComparer.Ordinal).ToArray();
+
+        return versions is [string resolved] ? resolved : null;
     }
 
     private static async Task<GradleModule[]> ReadModulesAsync(string root, string settingsFile, string settings,

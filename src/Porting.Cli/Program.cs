@@ -1,4 +1,5 @@
 using Porting.Cli;
+using Porting.Core.Generation;
 using Porting.Core.Inspection;
 using Porting.Core.Planning;
 
@@ -12,7 +13,7 @@ ConsoleCancelEventHandler cancel = (_, eventArgs) =>
 Console.CancelKeyPress += cancel;
 try
 {
-    PortingCommandLine cli = new(new GradleProjectInspector(), new PortPlanner());
+    PortingCommandLine cli = new(new GradleProjectInspector(), new PortPlanner(), new DesktopProjectGenerator());
     return await cli.RunAsync(args, cancellation.Token);
 }
 finally

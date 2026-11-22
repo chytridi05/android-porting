@@ -1,4 +1,5 @@
 using Porting.Core;
+using Porting.Core.Generation;
 using Porting.Core.Inspection;
 using Porting.Core.Planning;
 using System.Globalization;
@@ -6,7 +7,7 @@ using System.Globalization;
 namespace Porting.Cli
 {
     /// <summary>Dispatches CLI commands and formats shared porting results for the console.</summary>
-    internal sealed class PortingCommandLine(IProjectInspector inspector, IPortPlanner planner)
+    internal sealed class PortingCommandLine(IProjectInspector inspector, IPortPlanner planner, IDesktopProjectGenerator generator)
     {
         private const int OperationFailed = 1;
         private const int InvalidArguments = 2;
@@ -24,7 +25,7 @@ namespace Porting.Cli
             try
             {
                 string command = args[0];
-                if (command is not ("inspect" or "plan"))
+                if (command is not ("inspect" or "plan" or "generate"))
                 {
                     throw new FormatException($"Unknown command '{command}'.");
                 }
@@ -36,7 +37,8 @@ namespace Porting.Cli
                 }
 
                 string source = ReadDirectory(args, 1, "source project");
-                PortOptions? options = command == "plan" ? ReadPortOptions(args.AsSpan(2)) : null;
+                string? output = command == "generate" ? ReadDirectory(args, 2, "output project") : null;
+                PortOptions? options = command == "inspect" ? null : ReadPortOptions(args.AsSpan(output is null ? 2 : 3));
                 if (command == "inspect" && args.Length > 2)
                 {
                     throw new FormatException($"Unexpected argument '{args[2]}'.");
@@ -47,6 +49,19 @@ namespace Porting.Cli
                 if (options is not null)
                 {
                     PortPlan plan = planner.CreatePlan(inspection, options);
+                    if (output is not null)
+                    {
+                        GenerationResult generation = await generator.GenerateAsync(plan, output, cancellationToken);
+                        int exitCode = WriteDiagnostics(generation.Diagnostics);
+                        if (exitCode == 0)
+                        {
+                            Console.WriteLine($"Generated project: {generation.OutputDirectory}");
+                            Console.WriteLine($"Desktop module: {plan.DesktopModulePath}");
+                        }
+
+                        return exitCode;
+                    }
+
                     WritePlan(plan);
                     return WriteDiagnostics(plan.Diagnostics);
                 }
@@ -160,6 +175,15 @@ namespace Porting.Cli
             if (command is null or "plan")
             {
                 Console.WriteLine("  Porting.Cli plan <source-directory> [options]");
+            }
+
+            if (command is null or "generate")
+            {
+                Console.WriteLine("  Porting.Cli generate <source-directory> <output-directory> [options]");
+            }
+
+            if (command is null or "plan" or "generate")
+            {
                 Console.WriteLine();
                 Console.WriteLine("Port options:");
                 Console.WriteLine("  --entry <type>       Override the fully qualified game entry type.");
@@ -171,6 +195,11 @@ namespace Porting.Cli
 
             Console.WriteLine();
             Console.WriteLine("Inspect and plan read project files without running Gradle.");
+            if (command is null or "generate")
+            {
+                Console.WriteLine("Generate requires a new output directory separate from the input.");
+            }
+
             Console.WriteLine("Exit codes: 0 success, 1 operation failed, 2 invalid arguments, 130 canceled.");
         }
 

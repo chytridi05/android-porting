@@ -3,8 +3,8 @@
 A Windows x64 tool for porting Android applications to editable desktop projects.
 The first release targets libGDX games with a shared Java or Kotlin module.
 
-The C# / .NET 10 CLI will generate a Gradle project with an LWJGL3 desktop target
-and report compatibility issues. Build and packaging will be separate commands.
+The C# / .NET 10 CLI generates a Gradle project with an LWJGL3 desktop target
+and reports compatibility issues. Build and packaging are separate from generation.
 A WPF desktop interface will follow using the same porting core.
 
 Open `android-porting.slnx` in Visual Studio or run
@@ -39,6 +39,28 @@ under `tests/fixtures/kotlin-libgdx`.
 ```powershell
 .\tests\Test-InspectPlan.ps1 -Cli $cli -TiltMaze 'C:\path\to\tilt-maze'
 ```
+
+## Generate an editable desktop project
+
+```powershell
+$desktop = 'C:\path\to\new-desktop-project'
+& $cli generate $source $desktop
+```
+
+`generate` takes the same port options as `plan`. It copies the project into a
+new destination, adds an LWJGL3 module or keeps an existing one, and records
+the desktop module in `porting-project.json`. It leaves the source directory
+untouched and reports a conflict if the destination exists. The copy omits
+Git metadata, Gradle and Kotlin caches, conventional Gradle build directories,
+and the root `local.properties` machine settings.
+
+A new launcher expects a shared entry class with a no-argument constructor.
+It uses fixed libGDX versions read from the shared Gradle dependencies, adds
+desktop Box2D natives when the shared module uses Box2D, and reads assets from
+the desktop classpath in the planned directory order. Existing repository
+configuration must be available to the new module. Project-specific input
+and platform API adaptations are edits to make in the output copy. For Tilt
+Maze, the two input changes are in the Windows desktop patch below.
 
 ## Tilt Maze Android baseline
 

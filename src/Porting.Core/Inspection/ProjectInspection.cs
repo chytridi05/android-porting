@@ -19,4 +19,8 @@ public sealed record ProjectInspection(
     string? DesktopModulePath,
     string? GameEntryType,
     IReadOnlyList<string> AssetDirectories,
-    IReadOnlyList<PortDiagnostic> Diagnostics);
+    IReadOnlyList<PortDiagnostic> Diagnostics)
+{
+    /// <summary>Gets the libGDX library versions needed by a new desktop target.</summary>
+    internal DesktopLibraryVersions? DesktopLibraries { get; init; }
+}

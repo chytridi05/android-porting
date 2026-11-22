@@ -1,5 +1,5 @@
+using Porting.Core.Generation;
 using Porting.Core.Inspection;
-using System.Text.RegularExpressions;
 
 namespace Porting.Core.Planning;
 
@@ -8,15 +8,13 @@ public sealed class PortPlanner : IPortPlanner
 {
     private const int DefaultWindowWidth = 1280;
     private const int DefaultWindowHeight = 720;
-    private const string DefaultDesktopModule = ":lwjgl3";
-    private const string JvmIdentifier = @"[\p{L}_$][\p{L}\p{N}\p{M}_$]*";
 
     /// <inheritdoc />
     public PortPlan CreatePlan(ProjectInspection inspection, PortOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(inspection);
 
-        string desktopModule = inspection.DesktopModulePath ?? DefaultDesktopModule;
+        string desktopModule = inspection.DesktopModulePath ?? Lwjgl3Layout.ModulePath;
         string? gameEntry = options?.GameEntryType ?? inspection.GameEntryType;
         int windowWidth = options?.WindowWidth ?? DefaultWindowWidth;
         int windowHeight = options?.WindowHeight ?? DefaultWindowHeight;
@@ -24,7 +22,7 @@ public sealed class PortPlanner : IPortPlanner
             diagnostic.Code != "inspection.entry-unresolved"
             && (diagnostic.Code != "inspection.assets-unresolved" || options?.AssetDirectories is null))];
 
-        if (gameEntry is null || !Regex.IsMatch(gameEntry, @"\A" + JvmIdentifier + @"(?:\." + JvmIdentifier + @")*\z"))
+        if (!Lwjgl3Layout.IsGameEntry(gameEntry))
         {
             diagnostics.Add(new("plan.entry-invalid", DiagnosticSeverity.Error,
                 "Supply GameEntryType as a fully qualified JVM type name, for example com.example.MyGame."));
@@ -51,6 +49,22 @@ public sealed class PortPlanner : IPortPlanner
             }
         }
 
+        if (Path.Exists(Path.Combine(inspection.SourceDirectory, OutputProjectMetadata.FileName)))
+        {
+            diagnostics.Add(new("plan.output-metadata-conflict", DiagnosticSeverity.Error,
+                "Use the original Android source project to generate a new output copy. This project already contains the reserved porting metadata file.",
+                OutputProjectMetadata.FileName));
+        }
+
+        if (inspection.DesktopModulePath is null && inspection.DesktopLibraries is DesktopLibraryVersions libraries)
+        {
+            if (libraries.LibGdx is null || (libraries.UsesBox2D && libraries.Box2D is null))
+            {
+                diagnostics.Add(new("plan.gdx-version", DiagnosticSeverity.Error,
+                    $"Declare fixed libGDX and Box2D versions for {inspection.SharedModulePath}, either directly on the dependencies or through a literal Gradle property."));
+            }
+        }
+
         string[] filesToCreate = [];
         string[] filesToModify = [];
         if (!diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
@@ -67,11 +81,12 @@ public sealed class PortPlanner : IPortPlanner
                 {
                     diagnostics.Add(new("plan.existing-desktop", DiagnosticSeverity.Information,
                         $"Reuse {desktopModule} with its current launcher and window configuration."));
+                    filesToCreate = [OutputProjectMetadata.FileName];
                 }
             }
             else
             {
-                string desktopDirectory = DefaultDesktopModule[1..];
+                string desktopDirectory = Lwjgl3Layout.DirectoryName;
                 string desktopPath = Path.Combine(inspection.SourceDirectory, desktopDirectory);
                 if (Path.Exists(desktopPath))
                 {
@@ -80,10 +95,8 @@ public sealed class PortPlanner : IPortPlanner
                 }
                 else
                 {
-                    string buildFile = settingsFile.EndsWith(".kts", StringComparison.Ordinal) ? "build.gradle.kts" : "build.gradle";
-                    int packageEnd = gameEntry.LastIndexOf('.');
-                    string packageDirectory = packageEnd < 0 ? "" : gameEntry[..packageEnd].Replace('.', '/') + "/";
-                    filesToCreate = [$"{desktopDirectory}/{buildFile}", $"{desktopDirectory}/src/main/java/{packageDirectory}DesktopLauncher.java"];
+                    Lwjgl3Layout layout = new(settingsFile, gameEntry);
+                    filesToCreate = [layout.BuildScript, layout.LauncherFile, OutputProjectMetadata.FileName];
                     filesToModify = [settingsFile];
                 }
             }
@@ -112,7 +125,7 @@ public sealed class PortPlanner : IPortPlanner
             }
 
             string relative = Path.GetRelativePath(inspection.SourceDirectory, Path.Combine(inspection.SourceDirectory, path)).Replace('\\', '/');
-            if (relative == ".." || relative.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(relative)
+            if (relative is "." or ".." || relative.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(relative)
                 || !Directory.Exists(Path.Combine(inspection.SourceDirectory, relative)))
             {
                 diagnostics.Add(new("plan.asset-path", DiagnosticSeverity.Error, $"Asset directory '{path}' must exist inside the source project."));
