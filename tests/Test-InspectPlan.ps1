@@ -53,9 +53,38 @@ Assert-Cli @('inspect', (Join-Path $kotlinProject 'assets')) 1 @('Error inspecti
 Assert-Cli @('plan', $kotlinProject, '--height', 'tall') 2 @('requires an integer pixel value')
 Assert-Cli @('plan', $kotlinProject, '--no-assets', '--asset', 'assets/default') 2 @('Use either --asset or --no-assets')
 
+$temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+$unsupported = Join-Path $temporaryRoot "porting-unsupported-$([Guid]::NewGuid().ToString('N'))"
+$unsupportedApp = Join-Path $unsupported 'app'
+$null = [IO.Directory]::CreateDirectory($unsupportedApp)
+try {
+    Set-Content -LiteralPath (Join-Path $unsupported 'settings.gradle') -Value "include ':app'" -Encoding utf8
+    $appBuild = Join-Path $unsupportedApp 'build.gradle'
+    Set-Content -LiteralPath $appBuild -Value "plugins { id 'com.android.application' }" -Encoding utf8
+    Assert-Cli @('inspect', $unsupported) 1 @(
+        'Error inspection\.android-module', 'No Android libGDX module was found', 'Check the Gradle includes and libGDX dependencies'
+    )
+
+    Add-Content -LiteralPath $appBuild -Value "dependencies { implementation 'com.badlogicgames.gdx:gdx-backend-android:1.14.1' }"
+    Assert-Cli @('plan', $unsupported) 1 @(
+        'Error inspection\.shared-module', 'No shared libGDX module was found', 'Files to create: \(none\)'
+    )
+    $blockedOutput = Join-Path $unsupported 'blocked-output'
+    Assert-Cli @('generate', $unsupported, $blockedOutput) 1 @('Error inspection\.shared-module')
+    if (Test-Path -LiteralPath $blockedOutput) {
+        throw 'Generation wrote a project for an unsupported input.'
+    }
+}
+finally {
+    $resolved = (Resolve-Path -LiteralPath $unsupported).Path
+    if ([IO.Path]::GetDirectoryName($resolved) -eq [IO.Path]::TrimEndingDirectorySeparator($temporaryRoot)) {
+        Remove-Item -LiteralPath $resolved -Recurse -Force
+    }
+}
+
 $currentSettings = @(Get-FileHash -LiteralPath $settingsPaths)
 if (@(Compare-Object $originalSettings $currentSettings -Property Path, Hash).Count -gt 0) {
     throw 'A read-only command modified a settings file.'
 }
 
-Write-Output 'Java and Kotlin inspection and planning checks passed.'
+Write-Output 'Java and Kotlin inspection, planning, and unsupported-input checks passed.'

@@ -34,7 +34,9 @@ exit with code 2. `--help` lists the available options.
 To repeat the Java and Kotlin inspection and planning checks in PowerShell 7,
 point `-TiltMaze` to an **unpatched** copy of the pinned source described below.
 The Kotlin fixture and its mapped modules and asset directories are included
-under `tests/fixtures/kotlin-libgdx`.
+under `tests/fixtures/kotlin-libgdx`. The check also verifies that a regular
+Android Gradle project and a libGDX Android module without a shared module fail
+with diagnostics and leave no generated project.
 
 ```powershell
 .\tests\Test-InspectPlan.ps1 -Cli $cli -TiltMaze 'C:\path\to\tilt-maze'
@@ -95,7 +97,7 @@ For a reused desktop module, substitute its module path from
 
 ### Windows x64 workflow verification
 
-Run the workflow check from a Windows desktop session with PowerShell 7,
+Run the workflow check from a Windows desktop session with PowerShell 7, Git,
 JDK 21, and the Android SDK described below. Pass an unpatched Tilt Maze
 source directory and a new verification directory. The check uses the same
 Gradle Wrapper files for the included Kotlin fixture. Add `-Offline` after
@@ -103,16 +105,20 @@ the Wrapper distribution and build dependencies have been cached.
 
 ```powershell
 .\tests\Test-DesktopWorkflow.ps1 -Cli $cli `
-    -TiltMaze 'C:\path\to\tilt-maze' -WorkDirectory '.local\alpha-verification'
+    -TiltMaze 'C:\path\to\tilt-maze' -WorkDirectory '.local\beta-verification'
 ```
 
 The check verifies a failed copy and a clean retry, preserves an edited
 launcher on a destination conflict, and compares the input file hashes before
-and after the workflow. It builds both generated projects and opens and closes
-their Windows application windows. The Kotlin window title comes from the
-first asset directory in the override order. The verification directory
-retains the editable projects and logs. The offline Windows x64 run used
-Microsoft OpenJDK 21.0.7+6 and Gradle 8.14.3.
+and after the workflow. It applies the Tilt Maze keyboard changes to the Java
+export, builds both desktop targets, and verifies a complete playthrough and
+replay for each game. Tilt Maze uses frame-by-frame held-key input in LWJGL3.
+The Kotlin check sends arrow keys to the game window and verifies the win and
+replay through its title, which comes from the first configured asset directory.
+The check also runs the Tilt Maze shared tests and builds both Android debug
+APKs from the generated projects. The verification directory retains the
+editable projects and logs. The offline Windows x64 run used Microsoft OpenJDK
+21.0.7+6 and Gradle 8.14.3.
 
 ## Tilt Maze Android baseline
 
