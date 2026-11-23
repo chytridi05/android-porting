@@ -65,6 +65,23 @@ Assert-Cli @('inspect', $duplicate) 1 @(
     'Error apk.entry-conflict:', "$duplicate!/classes.dex", 'Error apk.manifest-missing:', 'Error apk.archive-path:', "$duplicate!/assets/CON"
 )
 
+$native = Join-Path $root 'native.apk'
+$archive = [IO.Compression.ZipFile]::Open($native, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    $null = $archive.CreateEntry('AndroidManifest.xml')
+    $null = $archive.CreateEntry('classes.dex')
+    $null = $archive.CreateEntry('lib/armeabi-v7a/libgame.so')
+}
+finally {
+    $archive.Dispose()
+}
+$unavailableJadx = Join-Path $root 'unavailable-jadx.jar'
+$blocked = Join-Path $root 'blocked-export'
+Assert-Cli @('generate', $native, $blocked, '--obb', $loose, '--jadx', $unavailableJadx) 1 @(
+    'Error apk.engine-unsupported:', 'libgame.so', 'Error apk.obb-decode:', $loose
+)
+if (Test-Path -LiteralPath $blocked) { throw 'An unsupported APK produced a project.' }
+
 if ((Get-FileHash -LiteralPath $apkPath).Hash -ne $apkHash -or
     (Get-FileHash -LiteralPath $loose).Hash -ne $looseHash -or
     (Get-FileHash -LiteralPath $extensionless).Hash -ne $extensionlessHash) {

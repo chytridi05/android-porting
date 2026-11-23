@@ -82,7 +82,9 @@ constructs its game entry without arguments. `--entry` overrides detection
 with a fully qualified class. The validated inputs use libGDX 1.14.1, with
 Box2D on Tilt Maze. Games with Android-specific controls may require edits
 such as the [Tilt Maze keyboard adaptation](samples/tilt-maze/apk-recovery.md).
-Split APKs and proprietary attachment decoders are later milestones.
+Planning reports unsupported APK engines and explicitly supplied expansion
+files outside the ZIP format before source recovery. Split APKs, native Android
+engines, and proprietary attachment decoders are later milestones.
 
 ### Verify two APK ports on Windows x64
 
@@ -104,7 +106,8 @@ $routeApk = "$fixture/build/outputs/apk/debug/obb-libgdx-fixture-debug.apk"
 The test recovers and plays Tilt Maze, checks missing and conflicting
 attachments and compares retained bytes. It packages the OBB game twice,
 changes the recovered route from `RUR` to `URU`, and verifies both routes
-with keyboard input to the Windows x64 executables. Each executable runs with
+with keyboard input to the Windows x64 executables. Add `-MouseOnly` to build
+Tilt Maze and play both OBB routes with mouse clicks. Each executable runs with
 a separate profile and only Windows system tools on `PATH`. Add `-Offline`
 when the Wrapper distribution and dependencies are already cached. For release
 qualification, run this on a clean Windows x64 host with the documented tools.

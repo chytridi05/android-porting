@@ -73,7 +73,11 @@ public sealed class ApkProjectPorter
 
             string snapshot = Path.Combine(workspace, "input.apk");
             await ApkProjectAssets.CopyCheckedFileAsync(inventory.ApkPath, snapshot, inventory.Package.Sha256, cancellationToken);
-            recovered = await ApkSourceRecovery.RecoverAsync(snapshot, inventory.ApkPath, workspace, options, diagnostics, cancellationToken);
+            if (await ApkPreflight.CheckAsync(snapshot, inventory, options.ObbPaths, diagnostics, cancellationToken))
+            {
+                recovered = await ApkSourceRecovery.RecoverAsync(snapshot, inventory.ApkPath, workspace, options, diagnostics, cancellationToken);
+            }
+
             if (recovered is not null && !HasErrors())
             {
                 string project = Path.Combine(workspace, "project");

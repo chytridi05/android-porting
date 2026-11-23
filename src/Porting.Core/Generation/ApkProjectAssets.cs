@@ -91,11 +91,6 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
             }
         }
 
-        foreach (string path in explicitObbs.Where(Directory.Exists))
-        {
-            diagnostics.Add(new("apk.obb-file", DiagnosticSeverity.Error, "Supply a ZIP expansion file with --obb.", path));
-        }
-
         if (recovered.UsesExpansion && !companions.Any(static file => file.DecodedFormat == "zip-obb"))
         {
             diagnostics.Add(new("apk.obb-missing", DiagnosticSeverity.Error,

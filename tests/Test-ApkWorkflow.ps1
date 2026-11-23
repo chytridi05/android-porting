@@ -3,7 +3,9 @@ param(
     [Parameter(Mandatory)] [string] $TiltMazeApk,
     [Parameter(Mandatory)] [string] $ObbGameApk,
     [Parameter(Mandatory)] [string] $WorkDirectory,
-    [switch] $Offline
+    [switch] $Offline,
+    [switch] $MouseOnly,
+    [string] $SoftwareOpenGlDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,9 +50,27 @@ function Assert-Window([Diagnostics.Process] $Process, [string] $Title) {
     throw "Expected window '$Title'. Last title was '$($Process.MainWindowTitle)'."
 }
 
+function Send-RouteMove([Diagnostics.Process] $Process, [char] $Direction) {
+    $right = $Direction -ceq 'R'
+    if ($MouseOnly) {
+        if (![Porting.Verification.WindowInput]::ClickHalf($Process.MainWindowHandle, $right)) {
+            throw 'Could not click the OBB game window.'
+        }
+    } else {
+        $key = if ($right) { 0x27 } else { 0x26 }
+        if (![Porting.Verification.WindowInput]::Press($Process.MainWindowHandle, $key)) {
+            throw 'Could not send a keyboard move to the OBB game.'
+        }
+    }
+}
+
 function Assert-PackagedRoute([string] $Archive, [string] $Route, [string] $Name) {
     $image = Join-Path $root "$Name & image"
     [IO.Compression.ZipFile]::ExtractToDirectory($Archive, $image)
+    if ($SoftwareOpenGlDirectory) {
+        # Supply the VM's software graphics driver next to the unpacked application.
+        Get-ChildItem -LiteralPath $SoftwareOpenGlDirectory -Filter '*.dll' -File | Copy-Item -Destination $image
+    }
     $executable = Join-Path $image 'OBBRoute.exe'
     if (!(Test-Path -LiteralPath (Join-Path $image 'runtime/lib/modules') -PathType Leaf)) {
         throw "The packaged runtime is missing from '$image'."
@@ -78,6 +98,9 @@ function Assert-PackagedRoute([string] $Archive, [string] $Route, [string] $Name
     $start.Environment['WINDIR'] = $env:SystemRoot
     $start.Environment['PATH'] = Join-Path $env:SystemRoot 'System32'
     $start.Environment['USERPROFILE'] = $profile
+    if ($SoftwareOpenGlDirectory) {
+        $start.Environment['GALLIUM_DRIVER'] = 'llvmpipe'
+    }
     foreach ($entry in @{ TEMP = 'Temp'; TMP = 'Temp'; LOCALAPPDATA = 'AppData/Local'; APPDATA = 'AppData/Roaming' }.GetEnumerator()) {
         $path = Join-Path $profile $entry.Value
         $null = [IO.Directory]::CreateDirectory($path)
@@ -100,23 +123,19 @@ function Assert-PackagedRoute([string] $Archive, [string] $Route, [string] $Name
             throw 'The game did not load the bundled Java VM.'
         }
 
-        $incorrect = if ($Route.StartsWith('R')) { 0x26 } else { 0x27 }
-        if (![Porting.Verification.WindowInput]::Press($process.MainWindowHandle, $incorrect)) {
-            throw 'Could not send an incorrect keyboard move to the OBB game.'
-        }
+        $incorrect = if ($Route.StartsWith('R')) { 'U' } else { 'R' }
+        Send-RouteMove $process $incorrect
         Assert-Window $process 'OBB Route Reset'
         for ($index = 0; $index -lt $Route.Length; $index++) {
-            $key = if ($Route[$index] -eq 'R') { 0x27 } else { 0x26 }
-            if (![Porting.Verification.WindowInput]::Press($process.MainWindowHandle, $key)) {
-                throw 'Could not send a keyboard move to the OBB game.'
-            }
+            Send-RouteMove $process ($Route[$index])
             $title = if ($index -eq $Route.Length - 1) { "OBB Route Complete $Route" } else { "OBB Route Step $($index + 1)" }
             Assert-Window $process $title
         }
         if (!$process.CloseMainWindow() -or !$launcher.WaitForExit(10000) -or $launcher.ExitCode -ne 0) {
             throw "The packaged game did not exit cleanly."
         }
-        Write-Output "The Windows x64 executable completed route $Route with only Windows system tools on PATH."
+        $inputMode = if ($MouseOnly) { 'mouse clicks' } else { 'keyboard input' }
+        Write-Output "The Windows x64 executable completed route $Route using $inputMode with only Windows system tools on PATH."
     }
     finally {
         if (!$launcher.HasExited) {
@@ -134,25 +153,29 @@ function Assert-PackagedRoute([string] $Archive, [string] $Route, [string] $Name
 
 $tilt = Join-Path $root 'Tilt Maze & recovered'
 Assert-Cli @('generate', $tiltApk, $tilt) 0 'Recovered source files: 5' 'tilt-generate'
-$patch = Join-Path $repo 'samples/tilt-maze/apk-desktop.patch'
-& git -C $repo apply --include='**/SandboxScreen.java' --include='**/TitleScreen.java' "--directory=$relativeRoot/Tilt Maze & recovered/core" $patch
-if ($LASTEXITCODE -ne 0) { throw 'Could not adapt the recovered Tilt Maze keyboard controls.' }
-Assert-Cli (@('build', $tilt) + $gradleOptions) 0 'Built :lwjgl3' 'tilt-build'
-$distribution = @(Get-ChildItem -LiteralPath "$tilt/lwjgl3/build/distributions" -Filter '*.zip' -File)
-if ($distribution.Count -ne 1) { throw 'Expected one Tilt Maze application ZIP.' }
-$tiltDist = Join-Path $root 'Tilt Maze distribution'
-[IO.Compression.ZipFile]::ExtractToDirectory($distribution[0].FullName, $tiltDist)
-$tiltLibraries = Join-Path (Get-ChildItem -LiteralPath $tiltDist -Directory).FullName 'lib/*'
-$classes = [IO.Directory]::CreateDirectory((Join-Path $root 'Keyboard verification')).FullName
-& "$env:JAVA_HOME/bin/javac.exe" -cp $tiltLibraries -d $classes "$PSScriptRoot/verification/TiltMazeKeyboardPlayback.java"
-if ($LASTEXITCODE -ne 0) { throw 'Could not compile the Tilt Maze keyboard verifier.' }
-$playback = @(& "$env:JAVA_HOME/bin/java.exe" -cp "$classes;$tiltLibraries" TiltMazeKeyboardPlayback 2>&1)
-$playbackExit = $LASTEXITCODE
-$playback | Set-Content -LiteralPath (Join-Path $root 'tilt-playback.log') -Encoding utf8
-if ($playbackExit -ne 0 -or !(($playback -join [Environment]::NewLine).Contains('Enter replay reset the game after the win.'))) {
-    throw 'Tilt Maze keyboard verification did not finish. See tilt-playback.log.'
+if (!$MouseOnly) {
+    $patch = Join-Path $repo 'samples/tilt-maze/apk-desktop.patch'
+    & git -C $repo apply --include='**/SandboxScreen.java' --include='**/TitleScreen.java' "--directory=$relativeRoot/Tilt Maze & recovered/core" $patch
+    if ($LASTEXITCODE -ne 0) { throw 'Could not adapt the recovered Tilt Maze keyboard controls.' }
 }
-Write-Output 'Tilt Maze reached WON and replayed using its recovered keyboard controls.'
+Assert-Cli (@('build', $tilt) + $gradleOptions) 0 'Built :lwjgl3' 'tilt-build'
+if (!$MouseOnly) {
+    $distribution = @(Get-ChildItem -LiteralPath "$tilt/lwjgl3/build/distributions" -Filter '*.zip' -File)
+    if ($distribution.Count -ne 1) { throw 'Expected one Tilt Maze application ZIP.' }
+    $tiltDist = Join-Path $root 'Tilt Maze distribution'
+    [IO.Compression.ZipFile]::ExtractToDirectory($distribution[0].FullName, $tiltDist)
+    $tiltLibraries = Join-Path (Get-ChildItem -LiteralPath $tiltDist -Directory).FullName 'lib/*'
+    $classes = [IO.Directory]::CreateDirectory((Join-Path $root 'Keyboard verification')).FullName
+    & "$env:JAVA_HOME/bin/javac.exe" -cp $tiltLibraries -d $classes "$PSScriptRoot/verification/TiltMazeKeyboardPlayback.java"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not compile the Tilt Maze keyboard verifier.' }
+    $playback = @(& "$env:JAVA_HOME/bin/java.exe" -cp "$classes;$tiltLibraries" TiltMazeKeyboardPlayback 2>&1)
+    $playbackExit = $LASTEXITCODE
+    $playback | Set-Content -LiteralPath (Join-Path $root 'tilt-playback.log') -Encoding utf8
+    if ($playbackExit -ne 0 -or !(($playback -join [Environment]::NewLine).Contains('Enter replay reset the game after the win.'))) {
+        throw 'Tilt Maze keyboard verification did not finish. See tilt-playback.log.'
+    }
+    Write-Output 'Tilt Maze reached WON and replayed using its recovered keyboard controls.'
+}
 
 $obb = Join-Path $root 'main.1.fixture.route.obb'
 [IO.Compression.ZipFile]::CreateFromDirectory((Join-Path $PSScriptRoot 'fixtures/obb-libgdx/obb'), $obb)
