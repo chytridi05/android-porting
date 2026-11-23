@@ -5,13 +5,15 @@ param(
     [Parameter(Mandatory)] [string] $WorkDirectory,
     [switch] $Offline,
     [switch] $MouseOnly,
-    [string] $SoftwareOpenGlDirectory
+    [string] $SoftwareOpenGlDirectory,
+    [string] $Desktop
 )
 
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $repo = (Resolve-Path -LiteralPath "$PSScriptRoot/..").Path
 $cliPath = (Resolve-Path -LiteralPath $Cli).Path
+$desktopPath = if ($Desktop) { (Resolve-Path -LiteralPath $Desktop).Path }
 $tiltApk = (Resolve-Path -LiteralPath $TiltMazeApk).Path
 $routeApk = (Resolve-Path -LiteralPath $ObbGameApk).Path
 $root = [IO.Path]::GetFullPath($WorkDirectory)
@@ -28,6 +30,9 @@ $gradleOptions = @()
 if ($Offline) { $gradleOptions = @('--offline') }
 if (!('Porting.Verification.WindowInput' -as [type])) {
     Add-Type -Path (Join-Path $PSScriptRoot 'verification/WindowInput.cs')
+}
+if ($desktopPath) {
+    . (Join-Path $PSScriptRoot 'verification/DesktopAutomation.ps1')
 }
 
 function Assert-Cli([string[]] $Command, [int] $ExpectedExit, [string] $ExpectedText, [string] $Log) {
@@ -153,6 +158,7 @@ function Assert-PackagedRoute([string] $Archive, [string] $Route, [string] $Name
 
 $tilt = Join-Path $root 'Tilt Maze & recovered'
 Assert-Cli @('generate', $tiltApk, $tilt) 0 'Recovered source files: 5' 'tilt-generate'
+if ($desktopPath) { $tiltFileHashes = @(Get-ExportFileHashes $tilt) }
 if (!$MouseOnly) {
     $patch = Join-Path $repo 'samples/tilt-maze/apk-desktop.patch'
     & git -C $repo apply --include='**/SandboxScreen.java' --include='**/TitleScreen.java' "--directory=$relativeRoot/Tilt Maze & recovered/core" $patch
@@ -179,6 +185,13 @@ if (!$MouseOnly) {
 
 $obb = Join-Path $root 'main.1.fixture.route.obb'
 [IO.Compression.ZipFile]::CreateFromDirectory((Join-Path $PSScriptRoot 'fixtures/obb-libgdx/obb'), $obb)
+$additionalAsset = ' route-note.txt'
+if ($desktopPath) {
+    # The leading space is part of the asset name in both front ends.
+    $expansion = [IO.Compression.ZipFile]::Open($obb, [IO.Compression.ZipArchiveMode]::Update)
+    try { $null = $expansion.CreateEntry($additionalAsset) }
+    finally { $expansion.Dispose() }
+}
 $opaqueDirectory = [IO.Directory]::CreateDirectory((Join-Path $root 'Attachments & originals')).FullName
 $unknown = Join-Path $opaqueDirectory 'unknown.binformat'
 $extensionless = Join-Path $opaqueDirectory 'payload'
@@ -204,7 +217,13 @@ Assert-Cli @('plan', $routeApk, '--companion', $obb, '--obb', $conflict) 1 'apk.
 
 $generateRoute = @('generate', $routeApk, $routeProject, '--companion', $obb, '--companion', $opaqueDirectory,
     '--require-asset', 'levels/route.txt')
-Assert-Cli $generateRoute 0 'Mapped resources: 1' 'obb-generate'
+$mappedResources = 1
+if ($desktopPath) {
+    $generateRoute += @('--require-asset', $additionalAsset)
+    $mappedResources++
+}
+Assert-Cli $generateRoute 0 "Mapped resources: $mappedResources" 'obb-generate'
+if ($desktopPath) { $routeFileHashes = @(Get-ExportFileHashes $routeProject) }
 $resource = Join-Path $routeProject 'assets/levels/route.txt'
 if ((Get-Content -LiteralPath $resource -Raw).Trim() -cne 'RUR') { throw 'The OBB route was not mapped.' }
 $metadataPath = Join-Path $routeProject 'porting-apk-inputs.json'
@@ -235,6 +254,7 @@ Assert-Cli (@('build', $routeProject) + $gradleOptions) 0 'Built :lwjgl3' 'obb-r
 $editedArchive = Join-Path $root 'obb-edited.zip'
 Assert-Cli (@('package', $routeProject, $editedArchive, '--exe', 'OBBRoute') + $gradleOptions) 0 'Packaged ZIP:' 'obb-repackage'
 Assert-PackagedRoute $editedArchive 'URU' 'Edited'
+if ($desktopPath) { Assert-DesktopApkParity $desktopPath }
 
 foreach ($hash in $inputHashes) {
     if ((Get-FileHash -LiteralPath $hash.Path).Hash -ne $hash.Hash) { throw "The APK workflow changed '$($hash.Path)'." }

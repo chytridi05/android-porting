@@ -137,7 +137,7 @@ namespace Porting.Desktop
 
         private void AddAttachment(string path, bool isObb)
         {
-            Attachment? existing = attachments.FirstOrDefault(item => item.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
+            Attachment? existing = attachments.FirstOrDefault(item => item.Path.Equals(path, StringComparison.Ordinal));
             if (existing is null)
             {
                 attachments.Add(new(path, isObb));
@@ -200,7 +200,7 @@ namespace Porting.Desktop
 
         private ApkPortOptions ReadOptions()
         {
-            string[] assets = RequiredAssets.Text.Split(['\r', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            string[] assets = RequiredAssets.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
             return new(attachments.Where(static item => !item.IsObb).Select(static item => item.Path).ToArray(),
                 attachments.Where(static item => item.IsObb).Select(static item => item.Path).ToArray(),
                 assets, Optional(ReadPath(JadxJar)), Optional(ReadPath(GradleHome)), Optional(EntryType.Text.Trim()));
@@ -210,7 +210,8 @@ namespace Porting.Desktop
 
         private static string ReadPath(TextBox field)
         {
-            return field.Text.Trim().Trim('"');
+            string path = field.Text;
+            return path.Length >= 2 && path[0] == '"' && path[^1] == '"' ? path[1..^1] : path;
         }
 
         private void ShowInventory(ApkInventory inventory)
