@@ -44,7 +44,7 @@ jobs:
           [IO.Compression.ZipFile]::ExtractToDirectory($jadxZip, $jadx)
 
           $mesaPackage = Join-Path $toolRoot 'mesa.7z'
-          Get-VerifiedArchive 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.6/mesa3d-26.2.6-release-msvc.7z' $mesaPackage 'b2e00615feaba45942343c265cc8c5f576142ca682c1ac6661922d4b72492877'
+          Get-VerifiedArchive 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.6/mesa3d-26.2.6-release-mingw.7z' $mesaPackage 'da0f71d9181b672c1918f3c342f11118c687f6059a46b16502845160733cc388'
           $mesa = Join-Path $toolRoot 'mesa'
           & "$env:ProgramFiles/7-Zip/7z.exe" x $mesaPackage "-o$mesa" -y | Select-Object -Last 8
           $openGl = Get-ChildItem -LiteralPath $mesa -Filter 'opengl32.dll' -Recurse -File | Where-Object { $_.Directory.Name -eq 'x64' } | Select-Object -First 1
