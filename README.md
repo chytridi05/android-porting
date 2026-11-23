@@ -44,3 +44,13 @@ See how Tilt Maze was adapted for keyboard play on Windows.
 [Recover Tilt Maze from its APK](samples/tilt-maze/apk-recovery.md).
 
 To build the CLI from source, run `dotnet build android-porting.slnx -c Release -p:Platform=x64` with the .NET 10 SDK.
+
+## APK inspection in development builds
+
+Pass an authorized APK and repeat `--companion` for files or directories.
+Inspection reports DEX entries, native libraries, APK assets, and SHA-256
+hashes for the APK and supplied files.
+
+```powershell
+.\Porting.Cli.exe inspect 'C:\inputs\game.apk' --companion 'C:\inputs\attachments'
+```

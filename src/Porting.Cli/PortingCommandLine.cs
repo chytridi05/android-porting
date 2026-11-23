@@ -55,7 +55,14 @@ namespace Porting.Cli
                     return await RunPackageAsync(args, cancellationToken);
                 }
 
-                string source = ReadRequiredArgument(args, 1, "source project directory");
+                string source = ReadRequiredArgument(args, 1,
+                    command == "inspect" ? "source project directory or APK" : "source project directory");
+                if (command == "inspect" && Path.GetExtension(source).Equals(".apk", StringComparison.OrdinalIgnoreCase)
+                    && !Directory.Exists(source))
+                {
+                    return await RunApkInspectAsync(source, args, cancellationToken);
+                }
+
                 string? output = command == "generate" ? ReadRequiredArgument(args, 2, "output project directory") : null;
                 PortOptions? options = command == "inspect" ? null : ReadPortOptions(args.AsSpan(output is null ? 2 : 3));
                 if (command == "inspect" && args.Length > 2)
@@ -103,6 +110,39 @@ namespace Porting.Cli
                 Console.Error.WriteLine(exception.Message);
                 return OperationFailed;
             }
+        }
+
+        private static async Task<int> RunApkInspectAsync(string source, string[] args, CancellationToken cancellationToken)
+        {
+            List<string> companions = [];
+            for (int index = 2; index < args.Length; index++)
+            {
+                if (args[index] != "--companion")
+                {
+                    throw new FormatException($"Unknown option '{args[index]}'.");
+                }
+
+                companions.Add(ReadValue(args, ref index));
+            }
+
+            ApkInventory inventory = await new ApkInspector().InspectAsync(source, companions, cancellationToken);
+            Console.WriteLine($"APK: {inventory.ApkPath}");
+            if (inventory.Package is ApkInputFile package)
+            {
+                Console.WriteLine($"APK SHA-256: {package.Sha256}");
+            }
+
+            WriteList("DEX entries", inventory.Entries.Select(static entry => entry.OriginalPath)
+                .Where(static path => path.StartsWith("classes", StringComparison.Ordinal)
+                    && path.EndsWith(".dex", StringComparison.Ordinal) && !path.Contains('/')).ToArray());
+            WriteList("APK assets", inventory.Entries.Select(static entry => entry.OriginalPath)
+                .Where(static path => path.StartsWith("assets/", StringComparison.Ordinal)).ToArray());
+            WriteList("Native libraries", inventory.Entries.Select(static entry => entry.OriginalPath)
+                .Where(static path => path.StartsWith("lib/", StringComparison.Ordinal)).ToArray());
+            WriteList("Companion files", inventory.Companions.Select(static file => file.ContainerPath is null
+                ? $"{file.Sha256}  {file.OriginalPath}"
+                : $"{file.Sha256}  {file.ContainerPath}!/{file.OriginalPath}").ToArray());
+            return WriteDiagnostics(inventory.Diagnostics);
         }
 
         private async Task<int> RunBuildAsync(string[] args, CancellationToken cancellationToken)
@@ -235,6 +275,7 @@ namespace Porting.Cli
             if (command is null or "inspect")
             {
                 Console.WriteLine("  Porting.Cli inspect <source-directory>");
+                Console.WriteLine("  Porting.Cli inspect <apk> [--companion <file-or-directory>]...");
             }
 
             if (command is null or "plan")
