@@ -46,7 +46,10 @@ function Wait-DesktopResult([string] $Action, [string] $Expected, [string] $Diag
     } while (!$finished -and [DateTime]::UtcNow -lt $deadline)
     if ($status -cne $Expected) {
         $summary = Get-DesktopValue 'Summary'
-        throw "Expected '$Expected' for '$Action'. Desktop status was '$status'. $summary"
+        $diagnostics = (Get-DesktopElement 'Diagnostics').FindAll(
+            [Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
+            ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Select-Object -Unique
+        throw "Expected '$Expected' for '$Action'. Desktop status was '$status'. $summary $($diagnostics -join ' | ')"
     }
     if ($Diagnostic) { Assert-DesktopText 'Diagnostics' $Diagnostic }
 }
