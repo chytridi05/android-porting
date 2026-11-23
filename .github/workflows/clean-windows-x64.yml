@@ -2,7 +2,7 @@ name: Verify CLI and WPF on clean Windows x64
 
 on:
   push:
-    branches: [codex/v030-clean-windows]
+    branches: [codex/v030-clean-windows, codex/v0.4.0]
   workflow_dispatch:
 
 permissions:
@@ -43,6 +43,9 @@ jobs:
           $jadx = Join-Path $toolRoot 'jadx'
           [IO.Compression.ZipFile]::ExtractToDirectory($jadxZip, $jadx)
 
+          $bundletool = Join-Path $toolRoot 'bundletool-all-1.18.0.jar'
+          Get-VerifiedArchive 'https://github.com/google/bundletool/releases/download/1.18.0/bundletool-all-1.18.0.jar' $bundletool '78343764d2e79c8f55710378b04981fcb1e46daebfc3b5dc577778082e6a98fd'
+
           $mesaPackage = Join-Path $toolRoot 'mesa.7z'
           Get-VerifiedArchive 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.6/mesa3d-26.2.6-release-mingw.7z' $mesaPackage 'da0f71d9181b672c1918f3c342f11118c687f6059a46b16502845160733cc388'
           $mesa = Join-Path $toolRoot 'mesa'
@@ -67,6 +70,7 @@ jobs:
               "GRADLE_HOME=$gradle"
               "GRADLE_USER_HOME=$(Join-Path $toolRoot 'fresh-gradle-cache')"
               "PORTING_JADX_JAR=$(Join-Path $jadx 'lib/jadx-1.5.3-all.jar')"
+              "PORTING_TEST_BUNDLETOOL=$bundletool"
               "PORTING_TEST_OPENGL_DIRECTORY=$softwareRenderer"
               'GALLIUM_DRIVER=llvmpipe'
           ) | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
@@ -134,6 +138,18 @@ jobs:
           }
           ./tests/Test-ApkWorkflow.ps1 @parameters | Tee-Object -FilePath '.local/clean-windows-release-check/verification.log'
 
+      - name: Verify split APKs, APK sets, asset packs, loose assets, and R8 mappings
+        shell: pwsh
+        run: |
+          $inputs = ./tests/New-AttachmentFixtures.ps1 -Bundletool $env:PORTING_TEST_BUNDLETOOL -WorkDirectory "$env:RUNNER_TEMP/attachment-fixtures"
+          $parameters = @{
+              Cli = $env:PORTING_TEST_CLI
+              Desktop = $env:PORTING_TEST_DESKTOP
+              WorkDirectory = '.local/clean-windows-attachments'
+              SoftwareOpenGlDirectory = $env:PORTING_TEST_OPENGL_DIRECTORY
+          }
+          ./tests/Test-AttachmentWorkflow.ps1 @inputs @parameters | Tee-Object -FilePath '.local/clean-windows-attachments/verification.log'
+
       - name: Preserve the verified release ZIPs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -146,6 +162,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-x64-verification-logs
-          path: .local/clean-windows-release-check/*.log
+          path: |
+            .local/clean-windows-release-check/*.log
+            .local/clean-windows-attachments/*.log
           include-hidden-files: true
           if-no-files-found: ignore

@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application' version '8.10.1'
+}
+
+def standalone = providers.gradleProperty('standalone').isPresent()
+if (!standalone) {
+    evaluationDependsOn(':featureApi')
+}
+
+android {
+    namespace 'fixture.attachment'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'fixture.attachment'
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName '1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+
+    lint {
+        checkReleaseBuilds false
+    }
+
+    sourceSets.main.java.srcDir(standalone ? 'src/standalone/java' : 'src/split/java')
+    if (!standalone) {
+        dynamicFeatures = [':feature']
+        assetPacks = [':routepack']
+    }
+
+    buildTypes {
+        minified {
+            initWith debug
+            debuggable false
+            minifyEnabled true
+            proguardFiles 'keep.pro'
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.badlogicgames.gdx:gdx:1.14.1'
+    implementation 'com.badlogicgames.gdx:gdx-backend-android:1.14.1'
+    if (!standalone) {
+        // Compile against the feature API while keeping its implementation in the split APK.
+        compileOnly files(project(':featureApi').tasks.named('jar'))
+    }
+}

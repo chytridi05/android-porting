@@ -13,7 +13,7 @@ in [APK quick start](#apk-quick-start). Set `JAVA_HOME` before launching the
 app. Set `PORTING_JADX_JAR` and `GRADLE_HOME` in the same environment or choose
 the JAR and Gradle folder under **APK port options**.
 
-1. Open **APK input** and choose a supported, authorized APK. Use **Add files**
+1. Open **APK input** and choose a supported, authorized APK or APK set. Use **Add files**
    and **Add folder** for companions, or paste each path into the companion
    field. Use **Add ZIP OBB** or **As ZIP OBB** for a renamed ZIP expansion.
 2. Choose **Inspect** to see paths, origins, and SHA-256 hashes. Choose
@@ -68,7 +68,7 @@ To build the CLI from source, run `dotnet build android-porting.slnx -c Release 
 
 ## APK quick start
 
-Use the CLI with an authorized standalone APK. Set `JAVA_HOME`
+Use the CLI with an authorized APK or APK set. Set `JAVA_HOME`
 to a Windows x64 JDK 21, `PORTING_JADX_JAR` to `jadx-1.5.3-all.jar`, and
 `GRADLE_HOME` to an unpacked Gradle 8.14.3 distribution. The generator copies
 the distribution's Gradle Wrapper after verifying its checksum. [JADX releases](https://github.com/skylot/jadx/releases/tag/v1.5.3) · [Gradle checksums](https://gradle.org/release-checksums/)
@@ -104,8 +104,28 @@ with a fully qualified class. The validated inputs use libGDX 1.14.1, with
 Box2D on Tilt Maze. Games with Android-specific controls may require edits
 such as the [Tilt Maze keyboard adaptation](samples/tilt-maze/apk-recovery.md).
 Planning reports unsupported APK engines and explicitly supplied expansion
-files outside the ZIP format before source recovery. Split APKs, native Android
-engines, and proprietary attachment decoders are later milestones.
+files outside the ZIP format before source recovery.
+
+### Additional APK inputs
+
+| Input | CLI | APK port options in WPF |
+| --- | --- | --- |
+| Base APK and matching splits | Repeat `--split <apk>` for each split. | Enter paths in **Split APKs**. |
+| bundletool APK set | Use the `.apks` as the main input. With multiple variants, select the number reported by `inspect` using `--apk-variant <number>`. | Choose the `.apks` file and enter the **APK set variant number** when prompted by diagnostics. |
+| Local resource pack | Repeat `--asset-pack <path>` for ZIP or APK archives with an `assets/` directory, or directories rooted at the extracted assets. | Enter paths in **Asset packs**. |
+| Loose files and directories | Repeat `--map-asset <path> <resource>`. Use `.` to map a directory directly at the resource root. | Enter `source \| resource` in **Loose asset mappings**, one pair per line. |
+| Matching R8 mapping | Pass `--r8-mapping <file>` with the APK or set. | Choose the **R8 mapping file** from the same Android build. |
+
+The APK set reader includes install-time asset packs. Supply local copies of
+additional packs and use `--require-asset` to check the paths needed by the
+game. The desktop export reads resources through libGDX. Game code that uses
+Android delivery APIs needs a desktop adaptation.
+
+The export records APK members and attachment hashes in
+`porting-apk-inputs.json`. Matching R8 IDs are recorded as `matched`.
+If either side lacks an ID, the port reports `apk.mapping-unconfirmed`.
+An explicit mismatch blocks recovery. Inspect the recovered symbols and build
+the editable export to validate the result.
 
 ### Verify two APK ports on Windows x64
 
@@ -141,6 +161,25 @@ On an interactive Windows x64 desktop, supply the extracted WPF release with
 UI Automation, compares SHA-256 hashes for every file in both editable
 exports, checks failure diagnostics and cancellation, and plays the
 original and edited OBB routes from ZIPs produced through the window.
+
+### Verify split APKs, APK sets, and attachment imports
+
+On Windows x64, set `JAVA_HOME`, `GRADLE_HOME`, `ANDROID_HOME`, and
+`PORTING_JADX_JAR` as above. Supply the official bundletool 1.18.0 JAR.
+Run the fixture builder and the attachment test in PowerShell 7.
+[bundletool 1.18.0 release](https://github.com/google/bundletool/releases/tag/1.18.0)
+
+```powershell
+$inputs = .\tests\New-AttachmentFixtures.ps1 -Bundletool 'C:\tools\bundletool-all-1.18.0.jar' -WorkDirectory '.local/attachment-fixtures'
+$tools = @{ Cli = 'C:\path\to\Porting.Cli.exe'; Desktop = 'C:\path\to\Porting.Desktop.exe' }
+.\tests\Test-AttachmentWorkflow.ps1 @inputs @tools -WorkDirectory '.local/attachment-verification'
+```
+
+The test recovers a feature class from a separate split, reads the required
+route resource in each packaged game, and compares CLI and WPF export hashes.
+It verifies an edited resource by playing the rebuilt executable, and checks
+missing assets, duplicate splits, invalid APK set variants, and mismatched
+or unconfirmed R8 mappings.
 
 ### Publish the desktop release locally
 

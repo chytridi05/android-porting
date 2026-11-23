@@ -1,0 +1,28 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id in ['com.android.dynamic-feature', 'com.android.asset-pack']) {
+                useModule("com.android.tools.build:gradle:${requested.version}")
+            }
+        }
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'attachments-libgdx-fixture'
+include 'app'
+if (!providers.gradleProperty('standalone').isPresent()) {
+    include 'feature', 'featureApi', 'routepack'
+}

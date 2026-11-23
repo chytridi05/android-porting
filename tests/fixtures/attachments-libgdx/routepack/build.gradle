@@ -1,0 +1,10 @@
+plugins {
+    id 'com.android.asset-pack' version '8.10.1'
+}
+
+assetPack {
+    packName = 'routepack'
+    dynamicDelivery {
+        deliveryType = 'install-time'
+    }
+}
