@@ -142,9 +142,10 @@ bytes. If a Windows loader needs another representation, supply a readable
 export through an asset pack or a loose asset mapping.
 
 RSB header identification, byte extraction, and Windows runtime use have
-separate verification results. The PvZ2 sample is used for local RSB layout
-verification. Its Android ARMv7 engine currently has no compatible Windows
-runtime in this tool.
+separate verification results. The local PvZ2 12.8.1 sample was used to
+validate 2,615 group packets and 9,244 resource ranges. The matching APK
+contains ARMv7 and ARM64 builds of its Android engine. A compatible Windows
+runtime is still needed for this engine.
 
 ### Verify two APK ports on Windows x64
 
