@@ -55,9 +55,9 @@ namespace Porting.Cli
                     return await RunPackageAsync(args, cancellationToken);
                 }
 
-                string source = ReadRequiredArgument(args, 1, "source project directory or APK");
+                string source = ReadRequiredArgument(args, 1, "source project directory, APK, or APK set");
                 string? output = command == "generate" ? ReadRequiredArgument(args, 2, "output project directory") : null;
-                if (Path.GetExtension(source).Equals(".apk", StringComparison.OrdinalIgnoreCase) && !Directory.Exists(source))
+                if (Path.GetExtension(source).ToLowerInvariant() is ".apk" or ".apks" && !Directory.Exists(source))
                 {
                     return command == "inspect"
                         ? await RunApkInspectAsync(source, args, cancellationToken)
@@ -121,6 +121,10 @@ namespace Porting.Cli
             {
                 Console.WriteLine($"APK SHA-256: {package.Sha256}");
             }
+            if (inventory.BaseApk is ApkInputFile baseApk)
+            {
+                Console.WriteLine($"Base APK: {baseApk.Sha256}  {baseApk.OriginalPath}");
+            }
 
             WriteList("DEX entries", inventory.Entries.Select(static entry => entry.OriginalPath)
                 .Where(static path => path.StartsWith("classes", StringComparison.Ordinal)
@@ -131,7 +135,8 @@ namespace Porting.Cli
                 .Where(static path => path.StartsWith("lib/", StringComparison.Ordinal)).ToArray());
             if (inventory.Splits.Count > 0)
             {
-                WriteList("Split APKs", inventory.Splits.Select(static split => $"{split.File.Sha256}  {split.File.OriginalPath}").ToArray());
+                WriteList("Split APKs", inventory.Splits.Select(static split => split.File.ContainerPath is string container
+                    ? $"{split.File.Sha256}  {container}!/{split.File.OriginalPath}" : $"{split.File.Sha256}  {split.File.OriginalPath}").ToArray());
                 WriteList("Split entries", inventory.Splits.SelectMany(static split => split.Entries)
                     .Select(static entry => $"{entry.Sha256}  {entry.ContainerPath}!/{entry.OriginalPath}").ToArray());
             }
@@ -172,6 +177,7 @@ namespace Porting.Cli
             List<string> assets = [];
             List<AttachmentSelection> attachments = [];
             List<string> splits = [];
+            int? variant = null;
             Dictionary<string, string> values = new(StringComparer.Ordinal);
             for (int index = 0; index < args.Length; index++)
             {
@@ -183,6 +189,13 @@ namespace Porting.Cli
                         break;
                     case "--split":
                         splits.Add(ReadValue(args, ref index));
+                        break;
+                    case "--apk-variant":
+                        if (variant.HasValue || !int.TryParse(ReadValue(args, ref index), NumberStyles.None, CultureInfo.InvariantCulture, out int number))
+                        {
+                            throw new FormatException("Option '--apk-variant' requires one nonnegative variant number.");
+                        }
+                        variant = number;
                         break;
                     case "--obb":
                         expansions.Add(ReadValue(args, ref index));
@@ -215,7 +228,8 @@ namespace Porting.Cli
                 values.GetValueOrDefault("--gradle-home"), values.GetValueOrDefault("--entry"))
             {
                 Attachments = attachments.AsReadOnly(),
-                SplitPaths = splits.AsReadOnly()
+                SplitPaths = splits.AsReadOnly(),
+                ApkSetVariant = variant
             };
         }
 
@@ -367,19 +381,19 @@ namespace Porting.Cli
             if (command is null or "inspect")
             {
                 Console.WriteLine("  Porting.Cli inspect <source-directory>");
-                Console.WriteLine("  Porting.Cli inspect <apk> [APK options]");
+                Console.WriteLine("  Porting.Cli inspect <apk-or-apks> [APK options]");
             }
 
             if (command is null or "plan")
             {
                 Console.WriteLine("  Porting.Cli plan <source-directory> [options]");
-                Console.WriteLine("  Porting.Cli plan <apk> [APK options]");
+                Console.WriteLine("  Porting.Cli plan <apk-or-apks> [APK options]");
             }
 
             if (command is null or "generate")
             {
                 Console.WriteLine("  Porting.Cli generate <source-directory> <output-directory> [options]");
-                Console.WriteLine("  Porting.Cli generate <apk> <output-directory> [APK options]");
+                Console.WriteLine("  Porting.Cli generate <apk-or-apks> <output-directory> [APK options]");
             }
 
             if (command is null or "build")
@@ -404,6 +418,7 @@ namespace Porting.Cli
                 Console.WriteLine("APK options:");
                 Console.WriteLine("  --companion <path>       Preserve a supplied file or directory. Repeat to add more.");
                 Console.WriteLine("  --split <apk>            Include a matching split APK. Repeat to add more.");
+                Console.WriteLine("  --apk-variant <number>   Select a bundletool variant when several are available.");
                 Console.WriteLine("  --obb <file>             Use a supplied file as a ZIP expansion archive. Repeat to add more.");
                 Console.WriteLine("  --map-asset <path> <resource>  Map a file or directory. Use '.' to map a directory at the resource root.");
                 Console.WriteLine("  --require-asset <path>   Require a case-sensitive resource path. Repeat to add more.");

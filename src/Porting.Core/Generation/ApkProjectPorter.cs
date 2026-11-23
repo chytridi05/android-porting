@@ -93,21 +93,39 @@ public sealed class ApkProjectPorter
 
             string snapshot = Path.Combine(workspace, "input.apk");
             string project = Path.Combine(workspace, "project");
-            await ApkProjectAssets.CopyCheckedFileAsync(inventory.ApkPath, snapshot, inventory.Package.Sha256, cancellationToken);
+            string primary = inventory.BaseApk is null ? snapshot : Path.Combine(workspace, "input.apks");
+            await ApkProjectAssets.CopyCheckedFileAsync(inventory.ApkPath, primary, inventory.Package.Sha256, cancellationToken);
             List<ApkSplitSnapshot> splits = [];
-            foreach (ApkSplitInventory split in inventory.Splits)
+            using (ZipArchive? archive = inventory.BaseApk is null ? null : ZipFile.OpenRead(primary))
             {
-                string preservedPath = $"porting-inputs/splits/{splits.Count + 1:D4}.apk";
-                string copy = Path.Combine(project, preservedPath);
-                location = split.File.OriginalPath;
-                await ApkProjectAssets.CopyCheckedFileAsync(location, copy, split.File.Sha256, cancellationToken);
-                splits.Add(new(split.File, copy, preservedPath));
+                if (inventory.BaseApk is ApkInputFile member)
+                {
+                    location = inventory.BaseLocation;
+                    await ApkProjectAssets.CopyCheckedMemberAsync(archive!, member, snapshot, cancellationToken);
+                }
+
+                foreach (ApkSplitInventory split in inventory.Splits)
+                {
+                    string preservedPath = $"porting-inputs/splits/{splits.Count + 1:D4}.apk";
+                    string copy = Path.Combine(project, preservedPath);
+                    ApkSplitSnapshot splitSnapshot = new(split.File, copy, preservedPath);
+                    location = splitSnapshot.Location;
+                    if (split.File.ContainerPath is null)
+                    {
+                        await ApkProjectAssets.CopyCheckedFileAsync(location, copy, split.File.Sha256, cancellationToken);
+                    }
+                    else
+                    {
+                        await ApkProjectAssets.CopyCheckedMemberAsync(archive!, split.File, copy, cancellationToken);
+                    }
+                    splits.Add(splitSnapshot);
+                }
             }
 
-            location = inventory.ApkPath;
+            location = inventory.BaseLocation;
             if (await ApkPreflight.CheckAsync(snapshot, inventory, splits, options.ObbPaths, diagnostics, cancellationToken))
             {
-                recovered = await ApkSourceRecovery.RecoverAsync(snapshot, inventory.ApkPath, splits, workspace, options, diagnostics, cancellationToken);
+                recovered = await ApkSourceRecovery.RecoverAsync(snapshot, location, splits, workspace, options, diagnostics, cancellationToken);
             }
 
             if (recovered is not null && !HasErrors())
@@ -248,6 +266,7 @@ public sealed class ApkProjectPorter
         {
             formatVersion = 2,
             inventory.Package,
+            inventory.BaseApk,
             recovered.PackageName,
             recovered.EntryType,
             Companions = assets.Companions,

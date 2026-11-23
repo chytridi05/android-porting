@@ -1,4 +1,5 @@
 using Porting.Core.Inspection;
+using System.IO.Compression;
 using System.Security.Cryptography;
 
 namespace Porting.Core.Generation;
@@ -43,7 +44,7 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
             conventionalNames.Add($"patch.{version}.{recovered.PackageName}.obb");
         }
 
-        foreach ((string path, string location) in splits.Select(static split => (split.SnapshotPath, split.Location)).Prepend((snapshot, inventory.ApkPath)))
+        foreach ((string path, string location) in splits.Select(static split => (split.SnapshotPath, split.Location)).Prepend((snapshot, inventory.BaseLocation)))
         {
             try
             {
@@ -153,6 +154,16 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
         _ = Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         await using FileStream input = File.OpenRead(source);
         await CopyAndHashAsync(input, destination, sha256, cancellationToken);
+    }
+
+    /// <summary>Extracts an APK from a verified set and checks its inventoried digest.</summary>
+    internal static async Task CopyCheckedMemberAsync(ZipArchive archive, ApkInputFile file, string destination, CancellationToken cancellationToken)
+    {
+        ZipArchiveEntry entry = archive.GetEntry(file.OriginalPath)
+            ?? throw new InvalidDataException($"The APK set is missing '{file.OriginalPath}'.");
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        await using Stream input = entry.Open();
+        await CopyAndHashAsync(input, destination, file.Sha256, cancellationToken);
     }
 
     private async ValueTask<IAttachmentAdapter?> FindAdapterAsync(AttachmentInput input, string? requestedFormat,

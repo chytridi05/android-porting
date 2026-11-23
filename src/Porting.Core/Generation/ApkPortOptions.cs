@@ -21,6 +21,9 @@ public sealed record ApkPortOptions(
     /// <summary>Gets additional split APK paths supplied with the base.</summary>
     public IReadOnlyList<string> SplitPaths { get; init; } = [];
 
+    /// <summary>Gets the bundletool variant number to select when an APK set has several variants.</summary>
+    public int? ApkSetVariant { get; init; }
+
     /// <summary>Enumerates the originals that must be inventoried and kept outside the export directory.</summary>
     public IEnumerable<string> GetCompanionPaths()
     {

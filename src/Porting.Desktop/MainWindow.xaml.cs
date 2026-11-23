@@ -37,7 +37,7 @@ namespace Porting.Desktop
 
         private void BrowseApk(object sender, RoutedEventArgs args)
         {
-            BrowseFile(ApkPath, "Android APK (*.apk)|*.apk");
+            BrowseFile(ApkPath, "Android packages (*.apk;*.apks)|*.apk;*.apks");
         }
 
         private void BrowseJadx(object sender, RoutedEventArgs args)
@@ -206,6 +206,17 @@ namespace Porting.Desktop
 
         private ApkPortOptions? ReadOptions()
         {
+            int? variant = null;
+            if (!string.IsNullOrWhiteSpace(ApkVariant.Text))
+            {
+                if (!int.TryParse(ApkVariant.Text, out int number) || number < 0)
+                {
+                    Finish([new("apk.set-variant", DiagnosticSeverity.Error, "Enter a nonnegative APK set variant number.")], "", DiagnosticsTab);
+                    return null;
+                }
+                variant = number;
+            }
+
             List<AttachmentSelection> mappings = [];
             foreach (string line in ReadLines(MappedAssets))
             {
@@ -224,7 +235,8 @@ namespace Porting.Desktop
                 ReadLines(RequiredAssets), Optional(ReadPath(JadxJar)), Optional(ReadPath(GradleHome)), Optional(EntryType.Text.Trim()))
             {
                 Attachments = mappings.AsReadOnly(),
-                SplitPaths = ReadLines(SplitApks).Select(UnquotePath).ToArray()
+                SplitPaths = ReadLines(SplitApks).Select(UnquotePath).ToArray(),
+                ApkSetVariant = variant
             };
 
             static string? Optional(string value) => value.Length == 0 ? null : value;
@@ -251,6 +263,10 @@ namespace Porting.Desktop
             IEnumerable<InventoryItem> companions = inventory.Companions.Select(static item => new InventoryItem("Companion", item));
             IEnumerable<InventoryItem> splits = inventory.Splits.SelectMany(static split =>
                 split.Entries.Select(static entry => new InventoryItem("Split entry", entry)).Prepend(new("Split APK", split.File)));
+            if (inventory.BaseApk is ApkInputFile baseApk)
+            {
+                entries = entries.Prepend(new("Base APK", baseApk));
+            }
             Inventory.ItemsSource = inventory.Package is ApkInputFile package
                 ? new[] { new InventoryItem("APK", package) }.Concat(companions).Concat(entries).Concat(splits).ToArray()
                 : companions.Concat(entries).Concat(splits).ToArray();

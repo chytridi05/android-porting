@@ -15,7 +15,7 @@ public sealed class ApkInspector
     public Task<ApkInventory> InspectAsync(string apkPath, IReadOnlyList<string> companionPaths,
         CancellationToken cancellationToken = default)
     {
-        return InspectInputsAsync(apkPath, companionPaths, [], cancellationToken);
+        return InspectInputsAsync(apkPath, companionPaths, [], null, cancellationToken);
     }
 
     /// <summary>Inventories the base APK, selected splits, and attachments for a port.</summary>
@@ -23,11 +23,11 @@ public sealed class ApkInspector
     {
         ArgumentNullException.ThrowIfNull(options);
         string[] companions = options.GetCompanionPaths().Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        return InspectInputsAsync(apkPath, companions, options.SplitPaths, cancellationToken);
+        return InspectInputsAsync(apkPath, companions, options.SplitPaths, options.ApkSetVariant, cancellationToken);
     }
 
     private static async Task<ApkInventory> InspectInputsAsync(string apkPath, IReadOnlyList<string> companionPaths,
-        IReadOnlyList<string> splitPaths, CancellationToken cancellationToken)
+        IReadOnlyList<string> splitPaths, int? variant, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(apkPath);
         ArgumentNullException.ThrowIfNull(companionPaths);
@@ -39,16 +39,37 @@ public sealed class ApkInspector
         List<ApkInputFile> companions = [];
         List<ApkSplitInventory> splits = [];
         ApkInputFile? package = null;
+        ApkInputFile? baseApk = null;
+        bool isSet = Path.GetExtension(fullApkPath).Equals(".apks", StringComparison.OrdinalIgnoreCase);
         try
         {
             await using FileStream input = OpenFile(fullApkPath);
             package = await ReadFileAsync(input, input.Length, fullApkPath, null, cancellationToken);
             input.Position = 0;
-            await ReadArchiveAsync(input, fullApkPath, entries, diagnostics, requireDex: true, cancellationToken);
+            if (isSet)
+            {
+                using ZipArchive archive = new(input, ZipArchiveMode.Read, leaveOpen: true);
+                (ZipArchiveEntry main, ZipArchiveEntry[] parts) = await BundletoolApkSet.SelectAsync(archive, variant, cancellationToken);
+                baseApk = await ReadApkMemberAsync(main, fullApkPath, entries, diagnostics, requireDex: true, cancellationToken);
+                foreach (ZipArchiveEntry part in parts)
+                {
+                    List<ApkInputFile> splitEntries = [];
+                    ApkInputFile file = await ReadApkMemberAsync(part, fullApkPath, splitEntries, diagnostics, requireDex: false, cancellationToken);
+                    splits.Add(new(file, splitEntries.AsReadOnly()));
+                }
+            }
+            else
+            {
+                if (variant is not null)
+                {
+                    diagnostics.Add(new("apk.set-variant", DiagnosticSeverity.Error, "Select an APK set variant only with an .apks input.", fullApkPath));
+                }
+                await ReadArchiveAsync(input, fullApkPath, entries, diagnostics, requireDex: true, cancellationToken);
+            }
         }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or OverflowException or NotSupportedException)
         {
-            diagnostics.Add(new("apk.read-failed", DiagnosticSeverity.Error, exception.Message, fullApkPath));
+            diagnostics.Add(new(isSet ? "apk.set-read" : "apk.read-failed", DiagnosticSeverity.Error, exception.Message, fullApkPath));
         }
 
         foreach (string path in companionPaths)
@@ -82,8 +103,19 @@ public sealed class ApkInspector
 
         return new(fullApkPath, package, entries.AsReadOnly(), companions.AsReadOnly(), diagnostics.AsReadOnly())
         {
-            Splits = splits.AsReadOnly()
+            Splits = splits.AsReadOnly(),
+            BaseApk = baseApk
         };
+    }
+
+    private static async Task<ApkInputFile> ReadApkMemberAsync(ZipArchiveEntry member, string archive, List<ApkInputFile> entries,
+        List<PortDiagnostic> diagnostics, bool requireDex, CancellationToken cancellationToken)
+    {
+        await using Stream hashInput = member.Open();
+        ApkInputFile file = await ReadFileAsync(hashInput, member.Length, member.FullName, archive, cancellationToken);
+        await using Stream apk = member.Open();
+        await ReadArchiveAsync(apk, $"{archive}!/{member.FullName}", entries, diagnostics, requireDex, cancellationToken);
+        return file;
     }
 
     private static async Task ReadArchiveAsync(Stream input, string apkPath, List<ApkInputFile> files,

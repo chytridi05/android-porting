@@ -22,6 +22,11 @@ public sealed record ApkInventory(
 {
     /// <summary>Gets the split APKs and their entries, in input order.</summary>
     public IReadOnlyList<ApkSplitInventory> Splits { get; init; } = [];
+
+    /// <summary>Gets the base member identity when the primary file is an APK set.</summary>
+    public ApkInputFile? BaseApk { get; init; }
+
+    internal string BaseLocation => BaseApk is null ? ApkPath : $"{ApkPath}!/{BaseApk.OriginalPath}";
 }
 
 /// <summary>Records the original bytes and entries of a supplied split APK.</summary>

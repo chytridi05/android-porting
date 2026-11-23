@@ -56,7 +56,7 @@
       <TabItem x:Name="ApkTab" Header="APK input">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="12">
-            <Label Content="_APK file" Target="{Binding ElementName=ApkPath}" Style="{StaticResource FieldLabel}" />
+            <Label Content="_APK or APK set" Target="{Binding ElementName=ApkPath}" Style="{StaticResource FieldLabel}" />
             <DockPanel>
               <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Browse…" Click="BrowseApk"
                       AutomationProperties.Name="Browse for APK" />
@@ -92,7 +92,10 @@
 
             <Expander x:Name="PortOptionsPanel" Header="APK port options" Margin="0,14,0,0">
               <StackPanel Margin="0,8,0,0">
-                <Label Content="Split APKs, one path per line" Target="{Binding ElementName=SplitApks}" Style="{StaticResource FieldLabel}" />
+                <Label Content="APK set variant number" Target="{Binding ElementName=ApkVariant}" Style="{StaticResource FieldLabel}" />
+                <TextBox x:Name="ApkVariant" AutomationProperties.Name="APK set variant number" />
+                <Label Content="Split APKs, one path per line" Target="{Binding ElementName=SplitApks}"
+                       Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
                 <TextBox x:Name="SplitApks" AcceptsReturn="True" MinHeight="58" MaxHeight="112" VerticalContentAlignment="Top"
                          VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Split APKs" />
                 <Label Content="Required assets, one path per line" Target="{Binding ElementName=RequiredAssets}"
