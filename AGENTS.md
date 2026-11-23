@@ -42,6 +42,44 @@ Use the following milestone order and acceptance criteria. Review changes to the
 | `0.5.0` | Pilot an APK-based route for a maintainer-approved engine or application stack beyond libGDX. Validate its application-specific formats and a representative Windows workflow. |
 | `1.0.0` | Stabilize the Windows x64 support matrix and the CLI, configuration, diagnostics, and attachment adapter contracts. Verify recovery, editability, building, and runtime use of required attachments for each supported route, including the documented workflow on at least two external projects. |
 
+### Proposed `0.5.0` work for PopCap RSB v4
+
+The released `0.4.0` attachment contract is the baseline for this work. The
+local international PvZ2 sample has an RSB v4 header and 588 in-bounds resource
+groups with `pgsr` v4 headers. Its Android runtime is an ARMv7 native library.
+
+1. **Report the attachment format independently.** Use a shared probe to
+   identify RSB from the file contents and report the version and group count
+   in CLI and WPF inspection. Run this probe before the engine compatibility
+   check. Verify ordinary `.obb` names, renamed and extensionless inputs, and
+   malformed headers. Use package naming to associate expansions with the APK
+   and keep explicit ZIP selection compatible with `--obb` and **Add ZIP OBB**.
+   Verify that both clients select the correct adapter for each format.
+2. **Read the validated RSB v4 layout.** Implement a read-only adapter using
+   `IAttachmentAdapter` and the shared resource writer. Check the group and
+   entry spans, compression variants, output lengths, and resource paths.
+   Preserve the original bundle and record each emitted resource's source group,
+   original path, output path, and SHA-256. Diagnose unsupported layouts or
+   required resource formats at the affected input. Verify the layout on the
+   supplied sample locally and use authored fixtures for repeatable tests.
+3. **Verify resource use on Windows.** With an authored fixture, map resources
+   from an RSB and from a matching readable export supplied as an asset pack
+   or loose files. Tie required resources and ZIP expansion checks to the
+   corresponding resource loaders. Check missing resources, conflicting paths,
+   truncated or invalid data, and cancellation. Compare the CLI and WPF
+   resource manifests. Edit a mapped resource, rebuild the Windows x64
+   executable, and verify the changed behavior with mouse clicks on clean
+   Windows. Keep identification, decoding, and runtime validation as separate
+   results.
+4. **Qualify the native engine pilot.** Select the engine with the maintainer
+   and confirm usable engine and application source, dependencies, and an
+   Android reference run. Produce an editable Windows x64 build and adapt its
+   resource loader, platform services, and input. Provide build and packaging
+   commands for the native target and verify required attachment use during
+   play. Track the PvZ2 sample's native engine as a separate blocker until a
+   compatible Windows runtime is available. Record RSB adapter results
+   independently of that engine's status.
+
 ## Interface review
 
 - For a new or changed class interface, propose the affected member signatures, including relevant internal signatures, before writing their implementations. Put the signature changes in the working tree when the interface can be reviewed there.
