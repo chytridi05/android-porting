@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)] [string] $TiltMazeApk,
     [Parameter(Mandatory)] [string] $ObbGameApk,
     [Parameter(Mandatory)] [string] $WorkDirectory,
-    [switch] $Offline
+    [switch] $Offline,
+    [string] $SoftwareOpenGlDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,6 +52,10 @@ function Assert-Window([Diagnostics.Process] $Process, [string] $Title) {
 function Assert-PackagedRoute([string] $Archive, [string] $Route, [string] $Name) {
     $image = Join-Path $root "$Name & image"
     [IO.Compression.ZipFile]::ExtractToDirectory($Archive, $image)
+    if ($SoftwareOpenGlDirectory) {
+        # Supply the VM's software graphics driver next to the unpacked application.
+        Get-ChildItem -LiteralPath $SoftwareOpenGlDirectory -Filter '*.dll' -File | Copy-Item -Destination $image
+    }
     $executable = Join-Path $image 'OBBRoute.exe'
     if (!(Test-Path -LiteralPath (Join-Path $image 'runtime/lib/modules') -PathType Leaf)) {
         throw "The packaged runtime is missing from '$image'."
@@ -78,6 +83,9 @@ function Assert-PackagedRoute([string] $Archive, [string] $Route, [string] $Name
     $start.Environment['WINDIR'] = $env:SystemRoot
     $start.Environment['PATH'] = Join-Path $env:SystemRoot 'System32'
     $start.Environment['USERPROFILE'] = $profile
+    if ($SoftwareOpenGlDirectory) {
+        $start.Environment['GALLIUM_DRIVER'] = 'llvmpipe'
+    }
     foreach ($entry in @{ TEMP = 'Temp'; TMP = 'Temp'; LOCALAPPDATA = 'AppData/Local'; APPDATA = 'AppData/Roaming' }.GetEnumerator()) {
         $path = Join-Path $profile $entry.Value
         $null = [IO.Directory]::CreateDirectory($path)
