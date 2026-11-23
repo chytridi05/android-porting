@@ -1,0 +1,131 @@
+diff --git a/build.gradle b/build.gradle
+new file mode 100644
+--- /dev/null
++++ b/build.gradle
+@@ -0,0 +1,15 @@
++plugins {
++    id 'application'
++}
++repositories {
++    mavenCentral()
++}
++dependencies {
++    implementation 'com.badlogicgames.gdx:gdx-backend-lwjgl3:1.14.1'
++    implementation 'com.badlogicgames.gdx:gdx-box2d:1.14.1'
++    runtimeOnly 'com.badlogicgames.gdx:gdx-platform:1.14.1:natives-desktop'
++    runtimeOnly 'com.badlogicgames.gdx:gdx-box2d-platform:1.14.1:natives-desktop'
++}
++application {
++    mainClass = 'com.micro1.maze.DesktopLauncher'
++}
+diff --git a/settings.gradle b/settings.gradle
+new file mode 100644
+--- /dev/null
++++ b/settings.gradle
+@@ -0,0 +1 @@
++rootProject.name = 'tilt-maze-apk'
+diff --git a/src/main/java/com/micro1/maze/DesktopLauncher.java b/src/main/java/com/micro1/maze/DesktopLauncher.java
+new file mode 100644
+--- /dev/null
++++ b/src/main/java/com/micro1/maze/DesktopLauncher.java
+@@ -0,0 +1,16 @@
++package com.micro1.maze;
++
++import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
++import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
++
++public final class DesktopLauncher {
++    private DesktopLauncher() {
++    }
++
++    public static void main(String[] args) {
++        var configuration = new Lwjgl3ApplicationConfiguration();
++        configuration.setTitle("Tilt Maze");
++        configuration.setWindowedMode(1280, 720);
++        new Lwjgl3Application(new MazeGame(), configuration);
++    }
++}
+diff --git a/src/main/java/com/micro1/maze/SandboxScreen.java b/src/main/java/com/micro1/maze/SandboxScreen.java
+--- a/src/main/java/com/micro1/maze/SandboxScreen.java
++++ b/src/main/java/com/micro1/maze/SandboxScreen.java
+@@ -1,6 +1,7 @@
+ package com.micro1.maze;
+ 
+ import com.badlogic.gdx.Gdx;
++import com.badlogic.gdx.Input.Keys;
+ import com.badlogic.gdx.ScreenAdapter;
+ import com.badlogic.gdx.graphics.Color;
+ import com.badlogic.gdx.graphics.OrthographicCamera;
+@@ -46,15 +47,17 @@
+ 
+     @Override // com.badlogic.gdx.ScreenAdapter, com.badlogic.gdx.Screen
+     public void render(float delta) {
+-        float tiltX = Gdx.input.getAccelerometerX();
+-        float tiltY = Gdx.input.getAccelerometerY();
++        float keyTilt = 2.0f;
++        float tiltX = (Gdx.input.isKeyPressed(Keys.RIGHT) ? keyTilt : 0.0f)
++                - (Gdx.input.isKeyPressed(Keys.LEFT) ? keyTilt : 0.0f);
++        float tiltY = (Gdx.input.isKeyPressed(Keys.UP) ? keyTilt : 0.0f)
++                - (Gdx.input.isKeyPressed(Keys.DOWN) ? keyTilt : 0.0f);
+         this.world.update(delta, tiltX, tiltY);
+-        if (Gdx.input.justTouched()) {
+-            if (this.world.getState() == MazeWorld.State.PLAYING) {
+-                this.world.resetBallOnly();
+-            } else if (this.world.getState() == MazeWorld.State.WON) {
+-                this.world.resetGame();
+-            }
++        MazeWorld.State state = this.world.getState();
++        if (state == MazeWorld.State.PLAYING && Gdx.input.isKeyJustPressed(Keys.R)) {
++            this.world.resetBallOnly();
++        } else if (state == MazeWorld.State.WON && Gdx.input.isKeyJustPressed(Keys.ENTER)) {
++            this.world.resetGame();
+         }
+         this.camera.update();
+         Gdx.gl.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+@@ -95,7 +98,7 @@
+         this.layout.setText(this.hudFont, String.format("TILT: %.1f, %.1f", Float.valueOf(tiltX), Float.valueOf(tiltY)));
+         this.hudFont.draw(this.batch, this.layout, 10.0f, this.hudFont.getCapHeight() + hudBaselineY);
+         this.hudFont.setColor(LIGHT_GREY);
+-        this.layout.setText(this.hudFont, "TAP TO RESET");
++        this.layout.setText(this.hudFont, "ARROW KEYS / R TO RESET");
+         this.hudFont.draw(this.batch, this.layout, 790.0f - this.layout.width, this.hudFont.getCapHeight() + hudBaselineY);
+         if (this.world.getState() == MazeWorld.State.FELL_IN) {
+             this.messageFont.setColor(Color.WHITE);
+@@ -104,7 +107,7 @@
+             this.bigMessageFont.setColor(Color.WHITE);
+             FontUtil.drawCentered(this.batch, this.bigMessageFont, this.layout, "YOU WIN", 400.0f, 220.0f);
+             this.promptFont.setColor(Color.WHITE);
+-            FontUtil.drawCentered(this.batch, this.promptFont, this.layout, "TAP TO PLAY AGAIN", 400.0f, 220.0f - 60.0f);
++            FontUtil.drawCentered(this.batch, this.promptFont, this.layout, "ENTER TO PLAY AGAIN", 400.0f, 220.0f - 60.0f);
+         }
+         this.batch.end();
+     }
+diff --git a/src/main/java/com/micro1/maze/TitleScreen.java b/src/main/java/com/micro1/maze/TitleScreen.java
+--- a/src/main/java/com/micro1/maze/TitleScreen.java
++++ b/src/main/java/com/micro1/maze/TitleScreen.java
+@@ -1,6 +1,7 @@
+ package com.micro1.maze;
+ 
+ import com.badlogic.gdx.Gdx;
++import com.badlogic.gdx.Input.Keys;
+ import com.badlogic.gdx.ScreenAdapter;
+ import com.badlogic.gdx.graphics.Color;
+ import com.badlogic.gdx.graphics.OrthographicCamera;
+@@ -35,7 +36,7 @@
+ 
+     @Override // com.badlogic.gdx.ScreenAdapter, com.badlogic.gdx.Screen
+     public void render(float delta) {
+-        if (Gdx.input.justTouched()) {
++        if (Gdx.input.isKeyJustPressed(Keys.ENTER)) {
+             this.game.setScreen(new SandboxScreen(this.game));
+             dispose();
+             return;
+@@ -46,7 +47,7 @@
+         this.batch.setProjectionMatrix(this.camera.combined);
+         this.batch.begin();
+         FontUtil.drawCentered(this.batch, this.titleFont, this.layout, "MAZE", 400.0f, 240.0f);
+-        FontUtil.drawCentered(this.batch, this.promptFont, this.layout, "TAP TO START", 400.0f, 240.0f - 50.0f);
++        FontUtil.drawCentered(this.batch, this.promptFont, this.layout, "ENTER TO START", 400.0f, 240.0f - 50.0f);
+         this.batch.end();
+     }
+ 

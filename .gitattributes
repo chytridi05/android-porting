@@ -1,1 +1,2 @@
 samples/tilt-maze/windows-desktop.patch text eol=lf
+samples/tilt-maze/apk-desktop.patch text eol=lf whitespace=-blank-at-eol,-blank-at-eof

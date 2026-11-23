@@ -41,4 +41,6 @@ the CLI ZIP includes .NET.
 See how Tilt Maze was adapted for keyboard play on Windows.
 [Tilt Maze walkthrough](https://github.com/chytridi05/android-porting/blob/v0.1.0/README.md#tilt-maze-windows-desktop-port)
 
+[Recover Tilt Maze from its APK](samples/tilt-maze/apk-recovery.md).
+
 To build the CLI from source, run `dotnet build android-porting.slnx -c Release -p:Platform=x64` with the .NET 10 SDK.
