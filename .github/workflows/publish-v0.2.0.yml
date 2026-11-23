@@ -1,0 +1,54 @@
+name: Publish verified Windows x64 v0.2.0
+
+on:
+  push:
+    branches: [codex/v020-release-verification]
+    paths: ['.github/workflows/publish-v0.2.0.yml']
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify the tagged commit and publish the tested artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: chytridi05/android-porting
+          VERIFIED_RUN: '45129481425'
+          VERIFIED_WORKFLOW_COMMIT: 47469124bff64f25b148f151b13d035da756e6d6
+          RELEASE_COMMIT: 42f2e7124a4d3df0ee070364914e35ce3fafd58c
+          EXPECTED_SHA256: 63b2a8f2a4d223b5ccc674a9a65a5066fc8b9037afe08237ab0d2eadc45f5bda
+        shell: bash
+        run: |
+          set -euo pipefail
+          verified="$(gh run view "$VERIFIED_RUN" --repo "$GH_REPO" --json conclusion,headSha --jq 'select(.conclusion == "success") | .headSha')"
+          test "$verified" = "$VERIFIED_WORKFLOW_COMMIT"
+          tag_object="$(gh api "repos/$GH_REPO/git/ref/tags/v0.2.0" --jq 'select(.object.type == "tag") | .object.sha')"
+          test -n "$tag_object"
+          tagged_commit="$(gh api "repos/$GH_REPO/git/tags/$tag_object" --jq '.object.sha')"
+          test "$tagged_commit" = "$RELEASE_COMMIT"
+
+          name=android-porting-v0.2.0-win-x64
+          gh run download "$VERIFIED_RUN" --repo "$GH_REPO" --name "$name" --dir release-download
+          cd release-download
+          printf '%s  %s\n' "$EXPECTED_SHA256" "$name.zip" > "$name.zip.sha256"
+          sha256sum --strict --check "$name.zip.sha256"
+
+          cat > release-notes.md <<'EOF'
+          ## APK to Windows x64
+
+          Recover editable LWJGL3 projects from supported standalone libGDX APKs. ZIP-based OBB assets are mapped to desktop resources, and the export records hashes and preserves original companion bytes.
+
+          Package a generated project as a Windows x64 executable with a bundled Java runtime. The self-contained CLI ZIP includes its .NET runtime.
+
+          The Windows x64 release check built Tilt Maze and an independent OBB game on a fresh Windows Server 2025 VM. Both the original and edited OBB routes completed using mouse clicks.
+
+          [APK quick start](https://github.com/chytridi05/android-porting/blob/v0.2.0/README.md#apk-quick-start) · [Windows verification](https://github.com/chytridi05/android-porting/actions/runs/45129481425)
+          EOF
+
+          gh release create v0.2.0 "$name.zip" "$name.zip.sha256" --repo "$GH_REPO" --verify-tag --latest --title 'v0.2.0' --notes-file release-notes.md
+          gh release view v0.2.0 --repo "$GH_REPO" --json url,isDraft,isPrerelease,assets
