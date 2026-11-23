@@ -21,7 +21,7 @@ internal static class ApkSourceRecovery
 
     /// <summary>Recovers a supported no-argument libGDX game entry and its Java source tree.</summary>
     internal static async Task<RecoveredApk?> RecoverAsync(string apk, string originalPath, IReadOnlyList<ApkSplitSnapshot> splits,
-        string workspace, ApkPortOptions options, List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
+        string workspace, ApkPortOptions options, R8Mapping? mapping, List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
     {
         string? jadx = options.JadxJar ?? Environment.GetEnvironmentVariable("PORTING_JADX_JAR");
         if (string.IsNullOrWhiteSpace(jadx) || !File.Exists(jadx))
@@ -68,7 +68,10 @@ internal static class ApkSourceRecovery
             }
         }
 
-        (int ExitCode, string Log)? run = await RunJadxAsync(decoded, originalPath, [apk, .. features?.Paths ?? []]);
+        string[] mappingArguments = mapping is null ? []
+            : ["--mappings-path", mapping.SnapshotPath, "--mappings-mode", "read",
+                "-Prename-mappings.format=PROGUARD_FILE", "-Prename-mappings.invert=yes"];
+        (int ExitCode, string Log)? run = await RunJadxAsync(decoded, originalPath, [.. mappingArguments, apk, .. features?.Paths ?? []]);
         if (run is null)
         {
             return null;
@@ -87,7 +90,7 @@ internal static class ApkSourceRecovery
         string package = (string)manifest.Attribute("package")!;
         string javaRoot = Path.Combine(decoded, "sources");
         string[] launchers = FindLaunchers(manifest, package);
-        string? launcher = launchers.Length == 1 ? launchers[0] : null;
+        string? launcher = launchers.Length == 1 ? RecoveredName(launchers[0]) : null;
         string? launcherFile = launcher is not null && IsTypeName(launcher) ? JavaPath(javaRoot, launcher) : null;
         string launcherText = launcherFile is not null && File.Exists(launcherFile)
             ? await File.ReadAllTextAsync(launcherFile, cancellationToken) : "";
@@ -117,7 +120,7 @@ internal static class ApkSourceRecovery
         HashSet<string> sourceCandidates = new(Directory.EnumerateFiles(sourceDirectory, "*.java", SearchOption.AllDirectories), StringComparer.OrdinalIgnoreCase);
         if (features is not null)
         {
-            foreach (string type in features.Types.Where(IsTypeName))
+            foreach (string type in features.Types.Select(RecoveredName).Where(IsTypeName))
             {
                 string source = JavaPath(javaRoot, type);
                 if (File.Exists(source))
@@ -168,6 +171,8 @@ internal static class ApkSourceRecovery
 
         return new(package, (string?)manifest.Attribute(Android + "versionCode"), entry, version, box2D,
             launcherText.Contains("setAPKExpansion(", StringComparison.Ordinal), javaRoot, sources.AsReadOnly());
+
+        string RecoveredName(string type) => mapping?.Types.GetValueOrDefault(type, type) ?? type;
 
         async Task<XElement?> DecodeManifestAsync(string input, string location, string name)
         {

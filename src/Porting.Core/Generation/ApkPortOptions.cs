@@ -24,10 +24,14 @@ public sealed record ApkPortOptions(
     /// <summary>Gets the bundletool variant number to select when an APK set has several variants.</summary>
     public int? ApkSetVariant { get; init; }
 
+    /// <summary>Gets the optional path to the R8 mapping from the same APK build.</summary>
+    public string? R8MappingPath { get; init; }
+
     /// <summary>Enumerates the originals that must be inventoried and kept outside the export directory.</summary>
     public IEnumerable<string> GetCompanionPaths()
     {
-        return CompanionPaths.Concat(ObbPaths).Concat(Attachments.Select(static attachment => attachment.Path));
+        IEnumerable<string> paths = CompanionPaths.Concat(ObbPaths).Concat(Attachments.Select(static attachment => attachment.Path));
+        return R8MappingPath is string mapping ? paths.Append(mapping) : paths;
     }
 }
 

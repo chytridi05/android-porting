@@ -54,6 +54,11 @@ namespace Porting.Desktop
             }
         }
 
+        private void BrowseR8Mapping(object sender, RoutedEventArgs args)
+        {
+            BrowseFile(R8MappingPath, "R8 mapping files (*.txt;*.map)|*.txt;*.map|All files (*.*)|*.*");
+        }
+
         private void BrowseGradle(object sender, RoutedEventArgs args)
         {
             BrowseDirectory("Choose an unpacked Gradle distribution", path => GradleHome.Text = path);
@@ -236,7 +241,8 @@ namespace Porting.Desktop
             {
                 Attachments = [.. mappings, .. ReadLines(AssetPacks).Select(UnquotePath).Select(AttachmentSelection.UseAssetPack)],
                 SplitPaths = ReadLines(SplitApks).Select(UnquotePath).ToArray(),
-                ApkSetVariant = variant
+                ApkSetVariant = variant,
+                R8MappingPath = Optional(ReadPath(R8MappingPath))
             };
 
             static string? Optional(string value) => value.Length == 0 ? null : value;

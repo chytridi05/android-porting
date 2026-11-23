@@ -30,7 +30,7 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
 
     /// <summary>Copies companions and unpacks assets using Windows-safe relative paths.</summary>
     internal async Task ReadAsync(ApkInventory inventory, RecoveredApk recovered, ApkPortOptions options, string snapshot,
-        IReadOnlyList<ApkSplitSnapshot> splits, CancellationToken cancellationToken)
+        IReadOnlyList<ApkSplitSnapshot> splits, R8Mapping? mapping, CancellationToken cancellationToken)
     {
         ILookup<string, AttachmentSelection> selections = options.ObbPaths.Select(static path => new AttachmentSelection(path, ZipObbAdapter.Id))
             .Concat(options.Attachments).ToLookup(static selection => Path.TrimEndingDirectorySeparator(Path.GetFullPath(selection.Path)),
@@ -79,6 +79,16 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
             try
             {
                 AttachmentSelection? selection = FindSelection(file, fullPath, selections);
+                if (mapping?.File.OriginalPath.Equals(fullPath, StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    if (selection is not null)
+                    {
+                        throw new InvalidDataException("The R8 mapping cannot also be selected as an attachment in another format.");
+                    }
+                    companions.Add(new(file, relative, "r8-mapping"));
+                    continue;
+                }
+
                 requestedFormat = selection?.FormatId;
                 string? target = selection?.ResourcePath;
                 if (selection is not null && file.ContainerPath is not null

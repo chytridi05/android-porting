@@ -124,24 +124,28 @@ public sealed class ApkProjectPorter
             }
 
             location = inventory.BaseLocation;
-            if (await ApkPreflight.CheckAsync(snapshot, inventory, splits, options.ObbPaths, diagnostics, cancellationToken))
+            R8Mapping? mapping = null;
+            if (options.R8MappingPath is string mappingPath)
             {
-                recovered = await ApkSourceRecovery.RecoverAsync(snapshot, location, splits, workspace, options, diagnostics, cancellationToken);
+                mapping = await R8Mapping.ReadAsync(inventory, mappingPath, snapshot, workspace, diagnostics, cancellationToken);
+            }
+            if (!HasErrors() && await ApkPreflight.CheckAsync(snapshot, inventory, splits, options.ObbPaths, mapping, diagnostics, cancellationToken))
+            {
+                recovered = await ApkSourceRecovery.RecoverAsync(snapshot, location, splits, workspace, options, mapping, diagnostics, cancellationToken);
             }
 
             if (recovered is not null && !HasErrors())
             {
                 assets = new(project, diagnostics, adapters);
-                await assets.ReadAsync(inventory, recovered, options, snapshot, splits, cancellationToken);
+                await assets.ReadAsync(inventory, recovered, options, snapshot, splits, mapping, cancellationToken);
                 if (output is not null && !HasErrors())
                 {
                     location = output;
                     string? gradleHome = options.GradleHome ?? Environment.GetEnvironmentVariable("GRADLE_HOME");
                     if (await WriteWrapperAsync(project, gradleHome, diagnostics, cancellationToken))
                     {
-                        await WriteProjectAsync(project, inventory, recovered, assets, splits, cancellationToken);
-                        cancellationToken.ThrowIfCancellationRequested();
-                        Directory.Move(project, output);
+                        await WriteProjectAsync(project, inventory, recovered, assets, splits, mapping, cancellationToken);
+                        await PublishProjectAsync(project, output, cancellationToken);
                         published = output;
                     }
                 }
@@ -179,6 +183,25 @@ public sealed class ApkProjectPorter
 
         ApkPortResult Result() => new(recovered?.PackageName, recovered?.EntryType, recovered?.LibGdxVersion,
             recovered?.SourceFiles.Count ?? 0, assets?.ResourceCount ?? 0, published, diagnostics.AsReadOnly());
+    }
+
+    private static async Task PublishProjectAsync(string project, string output, CancellationToken cancellationToken)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                Directory.Move(project, output);
+                return;
+            }
+            catch (Exception exception) when (attempt < 4 && !Path.Exists(output)
+                && (exception is UnauthorizedAccessException || (exception is IOException && (exception.HResult & 0xffff) == 32)))
+            {
+                // Windows can briefly deny renames while another process scans newly written files.
+                await Task.Delay(TimeSpan.FromMilliseconds(100 * attempt), cancellationToken);
+            }
+        }
     }
 
     private static async Task<bool> WriteWrapperAsync(string project, string? gradleHome, List<PortDiagnostic> diagnostics,
@@ -235,7 +258,7 @@ public sealed class ApkProjectPorter
     }
 
     private static async Task WriteProjectAsync(string project, ApkInventory inventory, RecoveredApk recovered, ApkProjectAssets assets,
-        IReadOnlyList<ApkSplitSnapshot> splits, CancellationToken cancellationToken)
+        IReadOnlyList<ApkSplitSnapshot> splits, R8Mapping? mapping, CancellationToken cancellationToken)
     {
         foreach (string file in recovered.SourceFiles)
         {
@@ -272,6 +295,7 @@ public sealed class ApkProjectPorter
             recovered.EntryType,
             Companions = assets.Companions,
             Splits = splits.Select(static split => new { split.File, split.PreservedPath }),
+            R8Mapping = mapping is null ? null : new { mapping.File, mapping.Match },
             Resources = assets.Resources,
             RuntimeUse = "unverified"
         }, OutputProjectMetadata.JsonOptions, cancellationToken);

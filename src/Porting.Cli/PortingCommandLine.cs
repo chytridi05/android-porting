@@ -217,6 +217,7 @@ namespace Porting.Cli
                     case "--entry":
                     case "--jadx":
                     case "--gradle-home":
+                    case "--r8-mapping":
                         if (!values.TryAdd(option, ReadValue(args, ref index)))
                         {
                             throw new FormatException($"Option '{option}' can only be used once.");
@@ -232,7 +233,8 @@ namespace Porting.Cli
             {
                 Attachments = attachments.AsReadOnly(),
                 SplitPaths = splits.AsReadOnly(),
-                ApkSetVariant = variant
+                ApkSetVariant = variant,
+                R8MappingPath = values.GetValueOrDefault("--r8-mapping")
             };
         }
 
@@ -425,6 +427,7 @@ namespace Porting.Cli
                 Console.WriteLine("  --obb <file>             Use a supplied file as a ZIP expansion archive. Repeat to add more.");
                 Console.WriteLine("  --map-asset <path> <resource>  Map a file or directory. Use '.' to map a directory at the resource root.");
                 Console.WriteLine("  --asset-pack <path>      Import a supplied ZIP/APK asset pack or extracted asset root.");
+                Console.WriteLine("  --r8-mapping <file>      Import the optional R8 mapping from the same APK build.");
                 Console.WriteLine("  --require-asset <path>   Require a case-sensitive resource path. Repeat to add more.");
                 Console.WriteLine("  --entry <type>          Override the recovered libGDX entry type.");
                 Console.WriteLine("  --jadx <jar>             Use the JADX CLI JAR. Defaults to PORTING_JADX_JAR.");

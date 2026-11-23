@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Porting.Core.Generation;
 
-/// <summary>Reads class descriptors from a standard DEX file.</summary>
+/// <summary>Reads class descriptors and compiler markers from a standard DEX file.</summary>
 internal sealed class ApkDex(byte[] data)
 {
     /// <summary>Checks whether an archive entry is a root application DEX file.</summary>
@@ -34,6 +34,21 @@ internal sealed class ApkDex(byte[] data)
             }
 
             yield return ReadString(ReadIndex(typeOffset + typeIndex * 4));
+        }
+    }
+
+    /// <summary>Enumerates JSON payloads of compiler markers in the DEX.</summary>
+    internal IEnumerable<string> ReadR8Markers()
+    {
+        CheckHeader();
+        int count = ReadIndex(56);
+        for (int index = 0; index < count; index++)
+        {
+            string value = ReadString(index);
+            if (value.StartsWith("~~R8{", StringComparison.Ordinal))
+            {
+                yield return value[4..];
+            }
         }
     }
 

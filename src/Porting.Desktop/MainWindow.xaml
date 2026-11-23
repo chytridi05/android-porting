@@ -116,6 +116,13 @@
                 <Label Content="Game entry class" Target="{Binding ElementName=EntryType}"
                        Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
                 <TextBox x:Name="EntryType" AutomationProperties.Name="Game entry class" />
+                <Label Content="R8 mapping file" Target="{Binding ElementName=R8MappingPath}"
+                       Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Browse…" Click="BrowseR8Mapping"
+                          AutomationProperties.Name="Browse for R8 mapping" />
+                  <TextBox x:Name="R8MappingPath" AutomationProperties.Name="R8 mapping file" />
+                </DockPanel>
                 <Label Content="JADX CLI JAR" Target="{Binding ElementName=JadxJar}"
                        Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
                 <DockPanel>

@@ -8,13 +8,15 @@ internal static class ApkPreflight
 {
     /// <summary>Reports unsupported inputs without recovering their application source.</summary>
     internal static async Task<bool> CheckAsync(string snapshot, ApkInventory inventory, IReadOnlyList<ApkSplitSnapshot> splits, IReadOnlyList<string> obbPaths,
-        List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
+        R8Mapping? mapping, List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
     {
         bool supported = await HasLibGdxReferencesAsync(snapshot, cancellationToken);
         foreach (ApkSplitSnapshot split in splits)
         {
             supported = supported || await HasLibGdxReferencesAsync(split.SnapshotPath, cancellationToken);
         }
+        supported = supported || (mapping?.Match == "matched"
+            && mapping.Types.Values.Contains("com.badlogic.gdx.Version", StringComparer.Ordinal));
         if (!supported)
         {
             string[] libraries = inventory.Entries.Select(static entry => entry.OriginalPath)
