@@ -130,7 +130,6 @@ jobs:
               TiltMazeApk = $env:TILT_TEST_APK
               ObbGameApk = $env:OBB_TEST_APK
               WorkDirectory = '.local/clean-windows-release-check'
-              MouseOnly = $true
               SoftwareOpenGlDirectory = $env:PORTING_TEST_OPENGL_DIRECTORY
           }
           ./tests/Test-ApkWorkflow.ps1 @parameters | Tee-Object -FilePath '.local/clean-windows-release-check/verification.log'
