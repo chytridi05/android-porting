@@ -1,0 +1,70 @@
+name: Publish verified Windows x64 v0.3.0-official
+
+on:
+  push:
+    branches: [codex/v030-publish-release]
+    paths: ['.github/workflows/publish-v0.3.0-official.yml']
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Publish the verified CLI and WPF ZIPs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: v0.3.0-official
+          VERIFIED_RUN: '45139509086'
+          RELEASE_COMMIT: b7e6459ffbb2321e31271d88312a149f21236fad
+          CLI_SHA256: a45a8bf3b4dad6c3ad9405abf2591a99751d7a63fa35aa0d845784e4f2796ca0
+          DESKTOP_SHA256: 130b0fae9308339e4a23072eed5eea692cd39517755887accd60f24d4bbbe5a8
+        shell: bash
+        run: |
+          set -euo pipefail
+          verified_commit="$(gh run view "$VERIFIED_RUN" --repo "$GH_REPO" --json conclusion,headSha --jq 'select(.conclusion == "success") | .headSha')"
+          if [[ "$verified_commit" != "$RELEASE_COMMIT" ]]; then
+            echo "The Windows verification run did not pass for the release commit." >&2
+            exit 1
+          fi
+
+          tag_object="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq 'select(.object.type == "tag") | .object.sha')"
+          tagged_commit="$(gh api "repos/$GH_REPO/git/tags/$tag_object" --jq 'select(.object.type == "commit") | .object.sha')"
+          if [[ "$tagged_commit" != "$RELEASE_COMMIT" ]]; then
+            echo "The release tag does not point to the verified commit." >&2
+            exit 1
+          fi
+
+          download="$RUNNER_TEMP/release-download"
+          gh run download "$VERIFIED_RUN" --repo "$GH_REPO" --name windows-x64-release --dir "$download"
+          cd "$download"
+          cli_archive=Porting.Cli-win-x64.zip
+          desktop_archive=Porting.Desktop-win-x64.zip
+          printf '%s  %s\n' "$CLI_SHA256" "$cli_archive" "$DESKTOP_SHA256" "$desktop_archive" > SHA256SUMS.txt
+          sha256sum --strict --check SHA256SUMS.txt
+
+          cat > release-notes.md <<'EOF'
+          ## Windows x64 desktop tool
+
+          Use the WPF app to import a supported libGDX APK and its companion files,
+          review diagnostics, generate an editable Gradle project, and build or package
+          it for Windows x64. The CLI and WPF app use the same porting core.
+
+          Both tool ZIPs include .NET. APK recovery and game packaging use the JDK,
+          JADX, and Gradle versions listed in the quick start.
+
+          GitHub Actions built and tested these ZIPs on a fresh Windows Server 2025
+          x64 runner. The two front ends produced matching editable exports for
+          Tilt Maze and the OBB fixture. The run also verified keyboard play and
+          rebuilt the OBB game with its edited route.
+
+          [Desktop quick start](https://github.com/chytridi05/android-porting/blob/v0.3.0-official/README.md#desktop-quick-start) · [Windows verification](https://github.com/chytridi05/android-porting/actions/runs/45139509086)
+          EOF
+
+          gh release create "$RELEASE_TAG" "$desktop_archive" "$cli_archive" SHA256SUMS.txt \
+            --repo "$GH_REPO" --verify-tag --latest --title "$RELEASE_TAG" --notes-file release-notes.md
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json url,isDraft,isPrerelease,assets
