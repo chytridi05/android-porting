@@ -127,6 +127,25 @@ If either side lacks an ID, the port reports `apk.mapping-unconfirmed`.
 An explicit mismatch blocks recovery. Inspect the recovered symbols and build
 the editable export to validate the result.
 
+### PopCap RSB v4 attachments
+
+Supply an RSB with `--companion <file>` or **Add files** in WPF. The inspector
+reads the header by content, including for renamed or extensionless files, and
+reports the bundle version and declared group count before checking the APK
+engine. `--obb` and **Add ZIP OBB** select the ZIP expansion loader.
+
+The adapter reads little-endian RSB v4 bundles with embedded RSG v4 packets
+and raw or zlib-compressed data sections. Generation preserves the original
+bundle and records each mapped resource's source group, original path, output
+path, and SHA-256 in `porting-apk-inputs.json`. Resources retain their original
+bytes. If a Windows loader needs another representation, supply a readable
+export through an asset pack or a loose asset mapping.
+
+RSB header identification, byte extraction, and Windows runtime use have
+separate verification results. The PvZ2 sample is used for local RSB layout
+verification. Its Android ARMv7 engine currently has no compatible Windows
+runtime in this tool.
+
 ### Verify two APK ports on Windows x64
 
 Use PowerShell 7 and an interactive Windows x64 desktop. Use the Tilt Maze

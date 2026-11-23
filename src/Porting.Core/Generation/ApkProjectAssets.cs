@@ -1,14 +1,17 @@
 using Porting.Core.Inspection;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 
 namespace Porting.Core.Generation;
 
 /// <summary>Records a supplied file, its exact copy, and whether it was opened as an expansion archive.</summary>
-internal sealed record PreservedCompanion(ApkInputFile Input, string PreservedPath, string? DecodedFormat);
+internal sealed record PreservedCompanion(ApkInputFile Input, string PreservedPath, string? DecodedFormat,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExpansionRole = null);
 
 /// <summary>Identifies the origin of a resource available on the desktop classpath.</summary>
-internal sealed record MappedApkResource(ApkInputFile Input, string ResourcePath);
+internal sealed record MappedApkResource(ApkInputFile Input, string ResourcePath,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] AttachmentSourceGroup? SourceGroup);
 
 /// <summary>Preserves supplied files and maps APK and ZIP expansion assets into a desktop project.</summary>
 internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diagnostics, IReadOnlyList<IAttachmentAdapter> adapters)
@@ -76,6 +79,7 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
 
             string? requestedFormat = null;
             string? decodedFormat = null;
+            string? expansionRole = null;
             try
             {
                 AttachmentSelection? selection = FindSelection(file, fullPath, selections);
@@ -103,9 +107,9 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
                     };
                 }
                 var key = (fullPath, requestedFormat, target);
+                AttachmentInput input = new(file, destination, recovered.PackageName, version, target);
                 if (!opened.TryGetValue(key, out decodedFormat))
                 {
-                    AttachmentInput input = new(file, destination, recovered.PackageName, version, target);
                     IAttachmentAdapter? adapter = await FindAdapterAsync(input, requestedFormat, cancellationToken);
                     if (adapter is not null)
                     {
@@ -116,15 +120,24 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
 
                     opened.Add(key, decodedFormat);
                 }
+                if (decodedFormat is ZipObbAdapter.Id or RsbAttachmentAdapter.Id)
+                {
+                    expansionRole = input.ExpansionRole;
+                }
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
             {
-                string code = requestedFormat == ZipObbAdapter.Id ? "apk.obb-decode" : "apk.attachment-decode";
+                string code = requestedFormat switch
+                {
+                    ZipObbAdapter.Id => "apk.obb-decode",
+                    RsbAttachmentAdapter.Id => "apk.rsb-decode",
+                    _ => "apk.attachment-decode"
+                };
                 diagnostics.Add(new(code, DiagnosticSeverity.Error, exception.Message, fullPath));
                 continue;
             }
 
-            companions.Add(new(file, relative, decodedFormat));
+            companions.Add(new(file, relative, decodedFormat, expansionRole));
             if (decodedFormat is null)
             {
                 diagnostics.Add(new("apk.companion-preserved", DiagnosticSeverity.Information,
@@ -208,7 +221,7 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
     }
 
     private async Task ReadResourceAsync(string originalPath, string container, string target, long length, Stream input, string location,
-        CancellationToken cancellationToken)
+        AttachmentSourceGroup? sourceGroup, CancellationToken cancellationToken)
     {
         List<string> parents = [];
         for (int slash = target.IndexOf('/'); slash >= 0; slash = target.IndexOf('/', slash + 1))
@@ -241,7 +254,7 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
             digest = await CopyAndHashAsync(input, destination, null, cancellationToken);
         }
 
-        MappedApkResource mapped = new(new(originalPath, container, length, digest), target);
+        MappedApkResource mapped = new(new(originalPath, container, length, digest), target, sourceGroup);
         _ = resources.TryAdd(target, mapped);
         foreach (string parent in parents)
         {
@@ -252,18 +265,32 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
 
     private sealed class ResourceWriter(ApkProjectAssets owner, string container) : IAttachmentResourceWriter
     {
-        private readonly HashSet<(string OriginalPath, string ResourcePath)> entries = [];
+        private readonly HashSet<(string OriginalPath, string ResourcePath, AttachmentSourceGroup? SourceGroup)> entries = [];
 
         /// <inheritdoc />
-        public async Task WriteAsync(string originalPath, string resourcePath, long length, Stream contents, CancellationToken cancellationToken)
+        public Task WriteAsync(string originalPath, string resourcePath, long length, Stream contents, CancellationToken cancellationToken)
         {
-            string location = $"{container}!/{originalPath}";
+            return WriteResourceAsync(originalPath, resourcePath, length, contents, null, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        public Task WriteAsync(string originalPath, string resourcePath, long length, Stream contents, AttachmentSourceGroup sourceGroup,
+            CancellationToken cancellationToken)
+        {
+            return WriteResourceAsync(originalPath, resourcePath, length, contents, sourceGroup, cancellationToken);
+        }
+
+        private async Task WriteResourceAsync(string originalPath, string resourcePath, long length, Stream contents,
+            AttachmentSourceGroup? sourceGroup, CancellationToken cancellationToken)
+        {
+            string location = sourceGroup is null ? $"{container}!/{originalPath}"
+                : $"{container}!/group {sourceGroup.Index} '{sourceGroup.Name}'!/{originalPath}";
             if (!WindowsArchivePath.IsSafe(resourcePath))
             {
                 Report(new("apk.asset-path", DiagnosticSeverity.Error, "The entry is not a valid relative Windows file path.", location));
                 return;
             }
-            if (!entries.Add((originalPath, resourcePath)))
+            if (!entries.Add((originalPath, resourcePath, sourceGroup)))
             {
                 Report(new("apk.asset-conflict", DiagnosticSeverity.Error, "The attachment repeats this resource entry.", location));
                 return;
@@ -271,7 +298,7 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
 
             try
             {
-                await owner.ReadResourceAsync(originalPath, container, resourcePath, length, contents, location, cancellationToken);
+                await owner.ReadResourceAsync(originalPath, container, resourcePath, length, contents, location, sourceGroup, cancellationToken);
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
             {

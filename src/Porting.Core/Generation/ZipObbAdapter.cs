@@ -15,11 +15,7 @@ internal sealed class ZipObbAdapter : IAttachmentAdapter
     public ValueTask<bool> RecognizesAsync(AttachmentInput input, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        string name = Path.GetFileName(input.File.OriginalPath);
-        bool matchesPackage = input.VersionCode is not null
-            && (name.Equals($"main.{input.VersionCode}.{input.PackageName}.obb", StringComparison.OrdinalIgnoreCase)
-                || name.Equals($"patch.{input.VersionCode}.{input.PackageName}.obb", StringComparison.OrdinalIgnoreCase));
-        if (!matchesPackage)
+        if (input.ExpansionRole is null)
         {
             return ValueTask.FromResult(false);
         }

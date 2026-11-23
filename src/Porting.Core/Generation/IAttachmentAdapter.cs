@@ -23,7 +23,30 @@ public interface IAttachmentAdapter
 /// <param name="VersionCode">The Android application version code, when known.</param>
 /// <param name="ResourcePath">An optional desktop resource path supplied by the caller.</param>
 public sealed record AttachmentInput(ApkInputFile File, string SnapshotPath, string PackageName, string? VersionCode,
-    string? ResourcePath = null);
+    string? ResourcePath = null)
+{
+    /// <summary>Identifies standard expansions associated with the selected Android package and version.</summary>
+    internal string? ExpansionRole
+    {
+        get
+        {
+            if (VersionCode is null)
+            {
+                return null;
+            }
+
+            string name = Path.GetFileName(File.OriginalPath);
+            string suffix = $".{VersionCode}.{PackageName}.obb";
+            return name.Equals("main" + suffix, StringComparison.OrdinalIgnoreCase) ? "main"
+                : name.Equals("patch" + suffix, StringComparison.OrdinalIgnoreCase) ? "patch" : null;
+        }
+    }
+}
+
+/// <summary>Identifies a resource group within an attachment.</summary>
+/// <param name="Name">The original group name.</param>
+/// <param name="Index">The zero-based group index in the attachment.</param>
+public sealed record AttachmentSourceGroup(string Name, uint Index);
 
 /// <summary>Accepts resources and diagnostics from an attachment adapter during a port.</summary>
 public interface IAttachmentResourceWriter
@@ -35,6 +58,13 @@ public interface IAttachmentResourceWriter
     /// <param name="contents">A stream at the start of the resource. The caller retains ownership.</param>
     /// <param name="cancellationToken">Cancels copying and hashing the resource.</param>
     Task WriteAsync(string originalPath, string resourcePath, long length, Stream contents, CancellationToken cancellationToken);
+
+    /// <summary>Copies a resource and records its group when the output tracks group provenance.</summary>
+    Task WriteAsync(string originalPath, string resourcePath, long length, Stream contents, AttachmentSourceGroup sourceGroup,
+        CancellationToken cancellationToken)
+    {
+        return WriteAsync(originalPath, resourcePath, length, contents, cancellationToken);
+    }
 
     /// <summary>Reports a finding tied to the attachment or one of its entries.</summary>
     void Report(PortDiagnostic diagnostic);
