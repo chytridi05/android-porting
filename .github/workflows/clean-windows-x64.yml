@@ -1,0 +1,152 @@
+name: Verify CLI and WPF on clean Windows x64
+
+on:
+  push:
+    branches: [codex/v030-clean-windows]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Prepare the fresh Windows x64 VM
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') { throw 'Expected an x64 VM.' }
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, OSArchitecture | Format-List
+          $toolRoot = Join-Path $env:RUNNER_TEMP 'porting-tools'
+          $null = New-Item -ItemType Directory -Path $toolRoot
+
+          function Get-VerifiedArchive([string] $Url, [string] $Destination, [string] $Sha256) {
+              Invoke-WebRequest -Uri $Url -OutFile $Destination -MaximumRetryCount 3 -RetryIntervalSec 5
+              if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash -ne $Sha256) {
+                  throw "SHA-256 mismatch for $Url."
+              }
+          }
+
+          $gradleZip = Join-Path $toolRoot 'gradle.zip'
+          Get-VerifiedArchive 'https://services.gradle.org/distributions/gradle-8.14.3-bin.zip' $gradleZip 'bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531'
+          [IO.Compression.ZipFile]::ExtractToDirectory($gradleZip, $toolRoot)
+          $gradle = Join-Path $toolRoot 'gradle-8.14.3'
+
+          $jadxZip = Join-Path $toolRoot 'jadx.zip'
+          Get-VerifiedArchive 'https://github.com/skylot/jadx/releases/download/v1.5.3/jadx-1.5.3.zip' $jadxZip '8280f3799c0273fe797a2bcd90258c943e451fd195f13d05400de5e6451d15ec'
+          $jadx = Join-Path $toolRoot 'jadx'
+          [IO.Compression.ZipFile]::ExtractToDirectory($jadxZip, $jadx)
+
+          $mesaPackage = Join-Path $toolRoot 'mesa.7z'
+          Get-VerifiedArchive 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.6/mesa3d-26.2.6-release-mingw.7z' $mesaPackage 'da0f71d9181b672c1918f3c342f11118c687f6059a46b16502845160733cc388'
+          $mesa = Join-Path $toolRoot 'mesa'
+          & "$env:ProgramFiles/7-Zip/7z.exe" x $mesaPackage "-o$mesa" -y | Select-Object -Last 8
+          $openGl = Get-ChildItem -LiteralPath $mesa -Filter 'opengl32.dll' -Recurse -File |
+              Where-Object { $_.Directory.Name -eq 'x64' } | Select-Object -First 1
+          if (!$openGl) { throw 'The Mesa archive does not contain an x64 OpenGL driver.' }
+          $softwareRenderer = $openGl.Directory.FullName
+          $java = Join-Path $toolRoot 'jdk-21'
+          Copy-Item -LiteralPath $env:JAVA_HOME_21_X64 -Destination $java -Recurse
+          Copy-Item -Path "$softwareRenderer/*.dll" -Destination "$java/bin"
+
+          $sdk = @(dotnet --list-sdks | Where-Object { $_ -match '^10\.\d+\.\d+ ' } |
+              ForEach-Object { [version]($_.Split(' ')[0]) } | Sort-Object)[-1]
+          if ($null -eq $sdk) { throw 'The runner does not supply the .NET 10 SDK.' }
+          @{ sdk = @{ version = "$sdk" } } | ConvertTo-Json | Set-Content -LiteralPath global.json -Encoding utf8
+          if (!(Test-Path -LiteralPath "$env:ANDROID_HOME/platforms/android-36/android.jar")) {
+              throw 'Android SDK Platform 36 is missing.'
+          }
+          @(
+              "JAVA_HOME=$java"
+              "GRADLE_HOME=$gradle"
+              "GRADLE_USER_HOME=$(Join-Path $toolRoot 'fresh-gradle-cache')"
+              "PORTING_JADX_JAR=$(Join-Path $jadx 'lib/jadx-1.5.3-all.jar')"
+              "PORTING_TEST_OPENGL_DIRECTORY=$softwareRenderer"
+              'GALLIUM_DRIVER=llvmpipe'
+          ) | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          & "$java/bin/java.exe" -version
+          dotnet --version
+
+      - name: Build independent Android APK inputs
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $tilt = Join-Path $env:RUNNER_TEMP 'tilt-maze-input'
+          git init --quiet $tilt
+          git -C $tilt fetch --quiet --depth=1 'https://github.com/Elia-Youssef/libGDX-2d-tilt-maze.git' 66f95e4708d2f2bda7fc02fa48b9ad66556ef262
+          git -C $tilt checkout --quiet --detach FETCH_HEAD
+          & "$env:GRADLE_HOME/bin/gradle.bat" -p $tilt --no-daemon --console=plain :android:assembleDebug
+          $obb = Join-Path $env:RUNNER_TEMP 'obb-fixture-input'
+          Copy-Item -LiteralPath 'tests/fixtures/obb-libgdx' -Destination $obb -Recurse
+          & "$env:GRADLE_HOME/bin/gradle.bat" -p $obb --no-daemon --console=plain assembleDebug
+          @(
+              "TILT_TEST_SOURCE=$tilt"
+              "TILT_TEST_APK=$tilt/android/build/outputs/apk/debug/android-debug.apk"
+              "OBB_TEST_APK=$obb/build/outputs/apk/debug/obb-libgdx-fixture-debug.apk"
+          ) | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+
+      - name: Build and extract the self-contained Windows x64 releases
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          dotnet build android-porting.slnx -c Release -p:Platform=x64
+          $releaseDirectory = [IO.Directory]::CreateDirectory((Join-Path $env:RUNNER_TEMP 'release-zips')).FullName
+          foreach ($app in @('Cli', 'Desktop')) {
+              $name = "Porting.$app"
+              $published = Join-Path $env:RUNNER_TEMP "$name-published"
+              dotnet publish "src/$name/$name.csproj" -c Release -r win-x64 -p:Platform=x64 --self-contained true -o $published
+              $zip = Join-Path $releaseDirectory "$name-win-x64.zip"
+              $installed = Join-Path $env:RUNNER_TEMP "$name & extracted"
+              [IO.Compression.ZipFile]::CreateFromDirectory($published, $zip)
+              [IO.Compression.ZipFile]::ExtractToDirectory($zip, $installed)
+              $exe = Join-Path $installed "$name.exe"
+              $version = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
+              if (!$version.EndsWith("+$env:GITHUB_SHA", [StringComparison]::Ordinal)) {
+                  throw "$name was built from an unexpected revision: $version"
+              }
+              if (!(Test-Path -LiteralPath (Join-Path $installed 'coreclr.dll') -PathType Leaf)) {
+                  throw "$name did not include its own .NET runtime."
+              }
+              $digest = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+              Write-Output "$name $version ($digest)"
+              "PORTING_TEST_$($app.ToUpperInvariant())=$exe" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          }
+          "PORTING_RELEASE_DIRECTORY=$releaseDirectory" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+
+      - name: Verify inspection, equivalent exports, and both packaged OBB routes
+        shell: pwsh
+        run: |
+          ./tests/Test-InspectPlan.ps1 -Cli $env:PORTING_TEST_CLI -TiltMaze $env:TILT_TEST_SOURCE
+          ./tests/Test-ApkInspection.ps1 -Cli $env:PORTING_TEST_CLI -Apk $env:TILT_TEST_APK -WorkDirectory '.local/clean-windows-inventory'
+          $parameters = @{
+              Cli = $env:PORTING_TEST_CLI
+              Desktop = $env:PORTING_TEST_DESKTOP
+              TiltMazeApk = $env:TILT_TEST_APK
+              ObbGameApk = $env:OBB_TEST_APK
+              WorkDirectory = '.local/clean-windows-release-check'
+              MouseOnly = $true
+              SoftwareOpenGlDirectory = $env:PORTING_TEST_OPENGL_DIRECTORY
+          }
+          ./tests/Test-ApkWorkflow.ps1 @parameters | Tee-Object -FilePath '.local/clean-windows-release-check/verification.log'
+
+      - name: Preserve the verified release ZIPs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-x64-release
+          path: ${{ env.PORTING_RELEASE_DIRECTORY }}/*.zip
+          if-no-files-found: error
+
+      - name: Preserve verification logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-x64-verification-logs
+          path: .local/clean-windows-release-check/*.log
+          include-hidden-files: true
+          if-no-files-found: ignore
