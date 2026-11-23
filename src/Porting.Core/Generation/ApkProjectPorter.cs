@@ -24,7 +24,7 @@ public sealed class ApkProjectPorter
     public ApkProjectPorter(IEnumerable<IAttachmentAdapter> attachmentAdapters)
     {
         ArgumentNullException.ThrowIfNull(attachmentAdapters);
-        adapters = new IAttachmentAdapter[] { new ZipObbAdapter() }.Concat(attachmentAdapters).ToArray();
+        adapters = new IAttachmentAdapter[] { new ZipObbAdapter(), new LooseAssetAdapter() }.Concat(attachmentAdapters).ToArray();
         if (adapters.Any(static adapter => adapter is null || string.IsNullOrWhiteSpace(adapter.FormatId))
             || adapters.Select(static adapter => adapter.FormatId).Distinct(StringComparer.Ordinal).Count() != adapters.Count)
         {
@@ -49,7 +49,8 @@ public sealed class ApkProjectPorter
     private async Task<ApkPortResult> PortAsync(string apkPath, string? output, ApkPortOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ApkInventory inventory = await new ApkInspector().InspectAsync(apkPath, [.. options.CompanionPaths, .. options.ObbPaths], cancellationToken);
+        string[] companionPaths = options.GetCompanionPaths().Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        ApkInventory inventory = await new ApkInspector().InspectAsync(apkPath, companionPaths, cancellationToken);
         List<PortDiagnostic> diagnostics = [.. inventory.Diagnostics];
         RecoveredApk? recovered = null;
         ApkProjectAssets? assets = null;
@@ -64,7 +65,7 @@ public sealed class ApkProjectPorter
         {
             AddConflict();
         }
-        if (output is not null && options.CompanionPaths.Concat(options.ObbPaths).Select(Path.GetFullPath)
+        if (output is not null && companionPaths
             .Any(path => Directory.Exists(path) && DesktopProjectGenerator.IsAtOrBelow(path, output)))
         {
             diagnostics.Add(new("generation.output-overlap", DiagnosticSeverity.Error,

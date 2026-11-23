@@ -31,8 +31,10 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
     internal async Task ReadAsync(ApkInventory inventory, RecoveredApk recovered, ApkPortOptions options, string snapshot,
         CancellationToken cancellationToken)
     {
-        HashSet<string> explicitObbs = new(options.ObbPaths.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
-        Dictionary<string, string?> opened = new(StringComparer.OrdinalIgnoreCase);
+        ILookup<string, AttachmentSelection> selections = options.ObbPaths.Select(static path => new AttachmentSelection(path, ZipObbAdapter.Id))
+            .Concat(options.Attachments).ToLookup(static selection => Path.TrimEndingDirectorySeparator(Path.GetFullPath(selection.Path)),
+                StringComparer.OrdinalIgnoreCase);
+        Dictionary<(string Path, string? Format, string? Target), string?> opened = [];
         string? version = recovered.VersionCode;
         HashSet<string> conventionalNames = new(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(version))
@@ -69,12 +71,23 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
                 continue;
             }
 
-            if (!opened.TryGetValue(fullPath, out string? decodedFormat))
+            string? requestedFormat = null;
+            string? decodedFormat = null;
+            try
             {
-                AttachmentInput input = new(file, destination, recovered.PackageName, version);
-                string? requestedFormat = explicitObbs.Contains(fullPath) ? ZipObbAdapter.Id : null;
-                try
+                AttachmentSelection? selection = FindSelection(file, fullPath, selections);
+                requestedFormat = selection?.FormatId;
+                string? target = selection?.ResourcePath;
+                if (selection?.FormatId == LooseAssetAdapter.Id && file.ContainerPath is not null
+                    && !Path.GetFullPath(selection.Path).Equals(fullPath, StringComparison.OrdinalIgnoreCase))
                 {
+                    string relativePath = file.OriginalPath.Replace('\\', '/');
+                    target = target == "." ? relativePath : $"{target}/{relativePath}";
+                }
+                var key = (fullPath, requestedFormat, target);
+                if (!opened.TryGetValue(key, out decodedFormat))
+                {
+                    AttachmentInput input = new(file, destination, recovered.PackageName, version, target);
                     IAttachmentAdapter? adapter = await FindAdapterAsync(input, requestedFormat, cancellationToken);
                     if (adapter is not null)
                     {
@@ -83,20 +96,21 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
                         decodedFormat = adapter.FormatId;
                     }
 
-                    opened.Add(fullPath, decodedFormat);
+                    opened.Add(key, decodedFormat);
                 }
-                catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
-                {
-                    string code = requestedFormat == ZipObbAdapter.Id ? "apk.obb-decode" : "apk.attachment-decode";
-                    diagnostics.Add(new(code, DiagnosticSeverity.Error, exception.Message, fullPath));
-                }
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
+            {
+                string code = requestedFormat == ZipObbAdapter.Id ? "apk.obb-decode" : "apk.attachment-decode";
+                diagnostics.Add(new(code, DiagnosticSeverity.Error, exception.Message, fullPath));
+                continue;
             }
 
             companions.Add(new(file, relative, decodedFormat));
-            if (opened.ContainsKey(fullPath) && decodedFormat is null)
+            if (decodedFormat is null)
             {
                 diagnostics.Add(new("apk.companion-preserved", DiagnosticSeverity.Information,
-                    "Preserved the original bytes. Provide a ZIP expansion with --obb if the game needs its contents as resources.", fullPath));
+                    "Preserved the original bytes. Select a resource mapping or a known attachment format if the game needs this file.", fullPath));
             }
         }
 
@@ -112,9 +126,23 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
             if (!resources.TryGetValue(asset, out MappedApkResource? resource) || resource.ResourcePath != asset)
             {
                 diagnostics.Add(new("apk.required-asset", DiagnosticSeverity.Error,
-                    $"Supply the required resource '{asset}' in the APK or a ZIP expansion archive. Resource paths are case-sensitive.", inventory.ApkPath));
+                    $"Supply the required resource '{asset}' in the APK or through an attachment mapping. Resource paths are case-sensitive.", inventory.ApkPath));
             }
         }
+    }
+
+    private static AttachmentSelection? FindSelection(ApkInputFile file, string path, ILookup<string, AttachmentSelection> selections)
+    {
+        IEnumerable<AttachmentSelection> candidates = selections[path];
+        if (file.ContainerPath is string root)
+        {
+            candidates = candidates.Concat(selections[Path.TrimEndingDirectorySeparator(root)]);
+        }
+
+        AttachmentSelection[] distinct = candidates.DistinctBy(static selection => (selection.FormatId, selection.ResourcePath)).Take(2).ToArray();
+        return distinct.Length > 1
+            ? throw new InvalidDataException("The attachment has conflicting explicit mappings.")
+            : distinct.FirstOrDefault();
     }
 
     /// <summary>Copies a source file and verifies that its bytes still match the inventory.</summary>

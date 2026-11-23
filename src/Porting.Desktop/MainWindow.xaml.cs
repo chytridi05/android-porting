@@ -159,23 +159,29 @@ namespace Porting.Desktop
         private async void InspectApk(object sender, RoutedEventArgs args)
         {
             string apk = ReadPath(ApkPath);
-            string[] paths = attachments.Select(static item => item.Path).ToArray();
-            await RunAsync("Inspecting APK", token => inspector.InspectAsync(apk, paths, token), ShowInventory);
+            if (ReadOptions() is ApkPortOptions options)
+            {
+                await RunAsync("Inspecting APK", token => inspector.InspectAsync(apk, options.GetCompanionPaths().ToArray(), token), ShowInventory);
+            }
         }
 
         private async void PlanApk(object sender, RoutedEventArgs args)
         {
             string apk = ReadPath(ApkPath);
-            ApkPortOptions options = ReadOptions();
-            await RunAsync("Planning port", token => porter.PlanAsync(apk, options, token), ShowPort);
+            if (ReadOptions() is ApkPortOptions options)
+            {
+                await RunAsync("Planning port", token => porter.PlanAsync(apk, options, token), ShowPort);
+            }
         }
 
         private async void GenerateApk(object sender, RoutedEventArgs args)
         {
             string apk = ReadPath(ApkPath);
             string output = ReadPath(OutputPath);
-            ApkPortOptions options = ReadOptions();
-            await RunAsync("Generating project", token => porter.GenerateAsync(apk, output, options, token), ShowPort);
+            if (ReadOptions() is ApkPortOptions options)
+            {
+                await RunAsync("Generating project", token => porter.GenerateAsync(apk, output, options, token), ShowPort);
+            }
         }
 
         private async void BuildProject(object sender, RoutedEventArgs args)
@@ -198,20 +204,44 @@ namespace Porting.Desktop
                 result => Finish(result.Diagnostics, $"Packaged ZIP: {result.ArchivePath}", LogTab), LogTab);
         }
 
-        private ApkPortOptions ReadOptions()
+        private ApkPortOptions? ReadOptions()
         {
-            string[] assets = RequiredAssets.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+            List<AttachmentSelection> mappings = [];
+            foreach (string line in ReadLines(MappedAssets))
+            {
+                string[] parts = line.Split('|', StringSplitOptions.TrimEntries);
+                if (parts is not [string source, string resource] || source.Length == 0 || resource.Length == 0)
+                {
+                    Finish([new("apk.asset-mapping", DiagnosticSeverity.Error, "Enter each mapping as source | resource.", line)], "", DiagnosticsTab);
+                    return null;
+                }
+
+                mappings.Add(AttachmentSelection.MapAsset(UnquotePath(source), resource));
+            }
+
             return new(attachments.Where(static item => !item.IsObb).Select(static item => item.Path).ToArray(),
                 attachments.Where(static item => item.IsObb).Select(static item => item.Path).ToArray(),
-                assets, Optional(ReadPath(JadxJar)), Optional(ReadPath(GradleHome)), Optional(EntryType.Text.Trim()));
+                ReadLines(RequiredAssets), Optional(ReadPath(JadxJar)), Optional(ReadPath(GradleHome)), Optional(EntryType.Text.Trim()))
+            {
+                Attachments = mappings.AsReadOnly()
+            };
 
             static string? Optional(string value) => value.Length == 0 ? null : value;
         }
 
         private static string ReadPath(TextBox field)
         {
-            string path = field.Text;
+            return UnquotePath(field.Text);
+        }
+
+        private static string UnquotePath(string path)
+        {
             return path.Length >= 2 && path[0] == '"' && path[^1] == '"' ? path[1..^1] : path;
+        }
+
+        private static string[] ReadLines(TextBox field)
+        {
+            return field.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
         }
 
         private void ShowInventory(ApkInventory inventory)

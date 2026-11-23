@@ -114,18 +114,8 @@ namespace Porting.Cli
 
         private static async Task<int> RunApkInspectAsync(string source, string[] args, CancellationToken cancellationToken)
         {
-            List<string> companions = [];
-            for (int index = 2; index < args.Length; index++)
-            {
-                if (args[index] != "--companion")
-                {
-                    throw new FormatException($"Unknown option '{args[index]}'.");
-                }
-
-                companions.Add(ReadValue(args, ref index));
-            }
-
-            ApkInventory inventory = await new ApkInspector().InspectAsync(source, companions, cancellationToken);
+            ApkPortOptions options = ReadApkPortOptions(args.AsSpan(2));
+            ApkInventory inventory = await new ApkInspector().InspectAsync(source, options.GetCompanionPaths().ToArray(), cancellationToken);
             Console.WriteLine($"APK: {inventory.ApkPath}");
             if (inventory.Package is ApkInputFile package)
             {
@@ -174,6 +164,7 @@ namespace Porting.Cli
             List<string> companions = [];
             List<string> expansions = [];
             List<string> assets = [];
+            List<AttachmentSelection> attachments = [];
             Dictionary<string, string> values = new(StringComparer.Ordinal);
             for (int index = 0; index < args.Length; index++)
             {
@@ -189,6 +180,14 @@ namespace Porting.Cli
                     case "--require-asset":
                         assets.Add(ReadValue(args, ref index));
                         break;
+                    case "--map-asset":
+                        string path = ReadValue(args, ref index);
+                        if (++index >= args.Length || string.IsNullOrWhiteSpace(args[index]) || args[index].StartsWith("--", StringComparison.Ordinal))
+                        {
+                            throw new FormatException("Option '--map-asset' requires a source path and a resource path.");
+                        }
+                        attachments.Add(AttachmentSelection.MapAsset(path, args[index]));
+                        break;
                     case "--entry":
                     case "--jadx":
                     case "--gradle-home":
@@ -203,7 +202,7 @@ namespace Porting.Cli
             }
 
             return new(companions, expansions, assets, values.GetValueOrDefault("--jadx"),
-                values.GetValueOrDefault("--gradle-home"), values.GetValueOrDefault("--entry"));
+                values.GetValueOrDefault("--gradle-home"), values.GetValueOrDefault("--entry")) { Attachments = attachments.AsReadOnly() };
         }
 
         private async Task<int> RunBuildAsync(string[] args, CancellationToken cancellationToken)
@@ -354,7 +353,7 @@ namespace Porting.Cli
             if (command is null or "inspect")
             {
                 Console.WriteLine("  Porting.Cli inspect <source-directory>");
-                Console.WriteLine("  Porting.Cli inspect <apk> [--companion <file-or-directory>]...");
+                Console.WriteLine("  Porting.Cli inspect <apk> [APK options]");
             }
 
             if (command is null or "plan")
@@ -391,6 +390,7 @@ namespace Porting.Cli
                 Console.WriteLine("APK options:");
                 Console.WriteLine("  --companion <path>       Preserve a supplied file or directory. Repeat to add more.");
                 Console.WriteLine("  --obb <file>             Use a supplied file as a ZIP expansion archive. Repeat to add more.");
+                Console.WriteLine("  --map-asset <path> <resource>  Map a file or directory. Use '.' to map a directory at the resource root.");
                 Console.WriteLine("  --require-asset <path>   Require a case-sensitive resource path. Repeat to add more.");
                 Console.WriteLine("  --entry <type>          Override the recovered libGDX entry type.");
                 Console.WriteLine("  --jadx <jar>             Use the JADX CLI JAR. Defaults to PORTING_JADX_JAR.");

@@ -97,6 +97,11 @@
                 <TextBox x:Name="RequiredAssets" AcceptsReturn="True" MinHeight="62" MaxHeight="112"
                          VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
                          AutomationProperties.Name="Required assets" />
+                <Label Content="Loose asset mappings, one source | resource per line" Target="{Binding ElementName=MappedAssets}"
+                       Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
+                <TextBox x:Name="MappedAssets" AcceptsReturn="True" MinHeight="58" MaxHeight="112" VerticalContentAlignment="Top"
+                         VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Loose asset mappings"
+                         ToolTip="Use . as the resource for a directory mapped at the asset root." />
                 <Label Content="Game entry class" Target="{Binding ElementName=EntryType}"
                        Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
                 <TextBox x:Name="EntryType" AutomationProperties.Name="Game entry class" />
