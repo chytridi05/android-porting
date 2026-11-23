@@ -200,6 +200,12 @@ It verifies an edited resource by playing the rebuilt executable, and checks
 missing assets, duplicate splits, invalid APK set variants, and mismatched
 or unconfirmed R8 mappings.
 
+The attachment workflow also checks RSB decoding, CLI and WPF manifest
+parity, and cancellation. It compares resources from an authored RSB with a
+matching readable export supplied as an asset pack and as loose files. Mouse
+input verifies the packaged original route and the changed route after editing
+the extracted asset and rebuilding.
+
 ### Publish the desktop release locally
 
 Publish into a new output folder from the repository root.

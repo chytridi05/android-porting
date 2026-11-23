@@ -23,6 +23,9 @@ public final class RouteGame extends ApplicationAdapter {
         ScreenUtils.clear(0.08f, 0.12f, 0.18f, 1.0f);
         char move = Gdx.input.isKeyJustPressed(Input.Keys.RIGHT) ? 'R'
             : Gdx.input.isKeyJustPressed(Input.Keys.UP) ? 'U' : ' ';
+        if (move == ' ' && Gdx.input.justTouched()) {
+            move = Gdx.input.getX() >= Gdx.graphics.getWidth() / 2 ? 'R' : 'U';
+        }
         if (move != ' ' && step < route.length()) {
             step = route.charAt(step) == move ? step + 1 : 0;
             Gdx.graphics.setTitle(step == route.length() ? "Attachment Route Complete " + route : "Attachment Route Step " + step);

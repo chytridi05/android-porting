@@ -52,7 +52,7 @@ function Wait-RouteTitle([Diagnostics.Process] $Process, [string] $Title) {
     throw "Expected '$Title'. Last title was '$($Process.MainWindowTitle)'."
 }
 
-function Assert-PackagedRoute([string] $Name, [string] $Project, [string] $Route) {
+function Assert-PackagedRoute([string] $Name, [string] $Project, [string] $Route, [switch] $Mouse) {
     $archive = Join-Path $root "$Name.zip"
     Invoke-CheckedCli "$Name-package" (@('package', $Project, $archive, '--exe', 'AttachmentRoute') + $gradleOptions)
     $image = Join-Path $root "$Name image"
@@ -66,6 +66,16 @@ function Assert-PackagedRoute([string] $Name, [string] $Project, [string] $Route
 
     $profile = [IO.Directory]::CreateDirectory((Join-Path $root "$Name profile")).FullName
     $executable = Join-Path $image 'AttachmentRoute.exe'
+    $pe = [IO.BinaryReader]::new([IO.File]::OpenRead($executable))
+    try {
+        $pe.BaseStream.Position = 0x3c
+        $pe.BaseStream.Position = $pe.ReadInt32()
+        if ($pe.ReadUInt32() -ne 0x00004550 -or $pe.ReadUInt16() -ne 0x8664) {
+            throw "The package '$archive' does not contain a Windows x64 executable."
+        }
+    }
+    finally { $pe.Dispose() }
+
     $start = [Diagnostics.ProcessStartInfo]::new($executable)
     $start.WorkingDirectory = $profile
     $start.UseShellExecute = $false
@@ -96,8 +106,15 @@ function Assert-PackagedRoute([string] $Name, [string] $Project, [string] $Route
         }
 
         for ($index = 0; $index -lt $Route.Length; $index++) {
-            $key = if ($Route[$index] -ceq 'R') { 0x27 } else { 0x26 }
-            if (![Porting.Verification.WindowInput]::Press($process.MainWindowHandle, $key)) { throw 'Keyboard input failed.' }
+            $right = $Route[$index] -ceq 'R'
+            if ($Mouse) {
+                if (![Porting.Verification.WindowInput]::ClickHalf($process.MainWindowHandle, $right)) {
+                    throw 'Mouse input failed.'
+                }
+            } else {
+                $key = if ($right) { 0x27 } else { 0x26 }
+                if (![Porting.Verification.WindowInput]::Press($process.MainWindowHandle, $key)) { throw 'Keyboard input failed.' }
+            }
             $expected = if ($index + 1 -lt $Route.Length) { "Attachment Route Step $($index + 1)" } else { "Attachment Route Complete $Route" }
             Wait-RouteTitle $process $expected
         }
@@ -221,3 +238,32 @@ foreach ($case in $cases) { Assert-PackagedRoute $case.Name $case.Project $case.
 $loose = ($cases | Where-Object Name -eq 'loose').Project
 Set-Content -LiteralPath (Join-Path $loose 'assets/levels/route.txt') -Value 'UR'
 Assert-PackagedRoute 'loose-edited' $loose 'UR'
+
+. (Join-Path $PSScriptRoot 'verification/RsbFixture.ps1')
+$rsbWork = Join-Path $root 'rsb-verification'
+& (Join-Path $PSScriptRoot 'Test-RsbAttachments.ps1') -Cli $cliPath -Apk $standalone -Desktop $Desktop -WorkDirectory $rsbWork
+$rsbProject = Join-Path $rsbWork 'RSB project'
+$readable = Join-Path $root 'readable RSB export'
+foreach ($entry in (Get-RsbFixtureResources).GetEnumerator()) {
+    $path = Join-Path $readable $entry.Key
+    $null = [IO.Directory]::CreateDirectory((Split-Path -Parent $path))
+    [IO.File]::WriteAllBytes($path, $entry.Value)
+}
+$readablePack = Join-Path $root 'readable pack project'
+$readableLoose = Join-Path $root 'readable loose project'
+Invoke-CheckedCli 'rsb-readable-pack' (@('generate', $standalone, $readablePack, '--asset-pack', $readable) + $routeCheck)
+Invoke-CheckedCli 'rsb-readable-loose' (@('generate', $standalone, $readableLoose, '--map-asset', $readable, '.') + $routeCheck)
+foreach ($resource in (Get-RsbFixtureResources).Keys) {
+    $hash = (Get-FileHash -LiteralPath (Join-Path $rsbProject "assets/$resource")).Hash
+    foreach ($export in $readablePack, $readableLoose) {
+        if ((Get-FileHash -LiteralPath (Join-Path $export "assets/$resource")).Hash -cne $hash) {
+            throw "The readable export and RSB bundle differ at '$resource'."
+        }
+    }
+}
+
+Assert-PackagedRoute 'rsb-original' $rsbProject 'RUR' -Mouse
+Assert-PackagedRoute 'rsb-readable' $readablePack 'RUR' -Mouse
+[IO.File]::WriteAllText((Join-Path $rsbProject 'assets/levels/route.txt'), 'URU')
+Invoke-CheckedCli 'rsb-edited-build' (@('build', $rsbProject) + $gradleOptions)
+Assert-PackagedRoute 'rsb-edited' $rsbProject 'URU' -Mouse
