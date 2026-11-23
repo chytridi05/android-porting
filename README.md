@@ -1,9 +1,30 @@
 # android-porting
 
-Port Android libGDX games to Windows x64. The CLI adds an LWJGL3 desktop target
-to an editable Gradle project from either a Gradle source tree or a supported APK.
+Port Android libGDX games to Windows x64. The desktop app exports editable
+Gradle projects from supported APKs. The CLI also accepts Gradle source trees.
 
-[Download the Windows x64 CLI](https://github.com/chytridi05/android-porting/releases/latest)
+[Windows x64 downloads](https://github.com/chytridi05/android-porting/releases/latest)
+
+## Desktop quick start
+
+Extract the `Porting.Desktop-win-x64.zip` release and run
+`Porting.Desktop.exe`. For APK recovery, use the JDK, JADX, and Gradle versions
+in [APK quick start](#apk-quick-start). Set `JAVA_HOME` before launching the
+app. Set `PORTING_JADX_JAR` and `GRADLE_HOME` in the same environment or choose
+the JAR and Gradle folder under **APK port options**.
+
+1. Open **APK input** and choose a supported, authorized APK. Use **Add files**
+   and **Add folder** for companions, or paste each path into the companion
+   field. Use **Add ZIP OBB** or **As ZIP OBB** for a renamed ZIP expansion.
+2. Choose **Inspect** to see paths, origins, and SHA-256 hashes. Choose
+   **Plan port** to preview source recovery and check resource requirements.
+   **Diagnostics** lists the severity, code, and location of each finding.
+3. Enter a new project folder and choose **Generate project**. Edit the
+   recovered Java files and assets in that folder as needed.
+4. Under **Build and package**, choose **Build project**. Enter a new ZIP
+   path and choose **Package ZIP**. Use the executable option for an EXE
+   or clear it for `Launch.cmd`. Extract the entire ZIP before launching
+   the game with its bundled Java runtime.
 
 ## Gradle source quick start
 
@@ -47,7 +68,7 @@ To build the CLI from source, run `dotnet build android-porting.slnx -c Release 
 
 ## APK quick start
 
-Use the `0.2.0` CLI line with an authorized standalone APK. Set `JAVA_HOME`
+Use the CLI with an authorized standalone APK. Set `JAVA_HOME`
 to a Windows x64 JDK 21, `PORTING_JADX_JAR` to `jadx-1.5.3-all.jar`, and
 `GRADLE_HOME` to an unpacked Gradle 8.14.3 distribution. The generator copies
 the distribution's Gradle Wrapper after verifying its checksum. [JADX releases](https://github.com/skylot/jadx/releases/tag/v1.5.3) · [Gradle checksums](https://gradle.org/release-checksums/)
@@ -111,3 +132,24 @@ Tilt Maze and play both OBB routes with mouse clicks. Each executable runs with
 a separate profile and only Windows system tools on `PATH`. Add `-Offline`
 when the Wrapper distribution and dependencies are already cached. For release
 qualification, run this on a clean Windows x64 host with the documented tools.
+
+### Verify equivalent desktop results
+
+On an interactive Windows x64 desktop, supply the extracted WPF release with
+`-Desktop 'C:\path\to\Porting.Desktop.exe'` when running
+`Test-ApkWorkflow.ps1` above. The test drives the WPF window through Windows
+UI Automation, compares SHA-256 hashes for every file in both editable
+exports, checks failure diagnostics and cancellation, and plays the
+original and edited OBB routes from ZIPs produced through the window.
+
+### Publish the desktop release locally
+
+Publish into a new output folder from the repository root.
+
+```powershell
+$publish = '.local/desktop-win-x64'
+dotnet publish src/Porting.Desktop/Porting.Desktop.csproj -c Release -r win-x64 `
+    -p:Platform=x64 --self-contained true -o $publish
+[IO.Compression.ZipFile]::CreateFromDirectory(
+    (Resolve-Path $publish).Path, [IO.Path]::GetFullPath('.local/Porting.Desktop-win-x64.zip'))
+```
