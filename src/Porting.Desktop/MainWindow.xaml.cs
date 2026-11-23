@@ -234,7 +234,7 @@ namespace Porting.Desktop
                 attachments.Where(static item => item.IsObb).Select(static item => item.Path).ToArray(),
                 ReadLines(RequiredAssets), Optional(ReadPath(JadxJar)), Optional(ReadPath(GradleHome)), Optional(EntryType.Text.Trim()))
             {
-                Attachments = mappings.AsReadOnly(),
+                Attachments = [.. mappings, .. ReadLines(AssetPacks).Select(UnquotePath).Select(AttachmentSelection.UseAssetPack)],
                 SplitPaths = ReadLines(SplitApks).Select(UnquotePath).ToArray(),
                 ApkSetVariant = variant
             };

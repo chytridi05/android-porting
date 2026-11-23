@@ -24,7 +24,8 @@ public sealed class ApkProjectPorter
     public ApkProjectPorter(IEnumerable<IAttachmentAdapter> attachmentAdapters)
     {
         ArgumentNullException.ThrowIfNull(attachmentAdapters);
-        adapters = new IAttachmentAdapter[] { new ZipObbAdapter(), new LooseAssetAdapter() }.Concat(attachmentAdapters).ToArray();
+        adapters = new IAttachmentAdapter[] { new ZipObbAdapter(), new LooseAssetAdapter(), new SuppliedAssetPackAdapter() }
+            .Concat(attachmentAdapters).ToArray();
         if (adapters.Any(static adapter => adapter is null || string.IsNullOrWhiteSpace(adapter.FormatId))
             || adapters.Select(static adapter => adapter.FormatId).Distinct(StringComparer.Ordinal).Count() != adapters.Count)
         {

@@ -42,6 +42,12 @@ public sealed record AttachmentSelection(string Path, string FormatId, string? R
     {
         return new(path, LooseAssetAdapter.Id, resourcePath);
     }
+
+    /// <summary>Maps a supplied archive's assets directory or a supplied extracted asset root.</summary>
+    public static AttachmentSelection UseAssetPack(string path)
+    {
+        return new(path, SuppliedAssetPackAdapter.Id);
+    }
 }
 
 /// <summary>Reports the resolved APK port and any blocking inputs.</summary>

@@ -211,6 +211,9 @@ namespace Porting.Cli
                         }
                         attachments.Add(AttachmentSelection.MapAsset(path, args[index]));
                         break;
+                    case "--asset-pack":
+                        attachments.Add(AttachmentSelection.UseAssetPack(ReadValue(args, ref index)));
+                        break;
                     case "--entry":
                     case "--jadx":
                     case "--gradle-home":
@@ -421,6 +424,7 @@ namespace Porting.Cli
                 Console.WriteLine("  --apk-variant <number>   Select a bundletool variant when several are available.");
                 Console.WriteLine("  --obb <file>             Use a supplied file as a ZIP expansion archive. Repeat to add more.");
                 Console.WriteLine("  --map-asset <path> <resource>  Map a file or directory. Use '.' to map a directory at the resource root.");
+                Console.WriteLine("  --asset-pack <path>      Import a supplied ZIP/APK asset pack or extracted asset root.");
                 Console.WriteLine("  --require-asset <path>   Require a case-sensitive resource path. Repeat to add more.");
                 Console.WriteLine("  --entry <type>          Override the recovered libGDX entry type.");
                 Console.WriteLine("  --jadx <jar>             Use the JADX CLI JAR. Defaults to PORTING_JADX_JAR.");

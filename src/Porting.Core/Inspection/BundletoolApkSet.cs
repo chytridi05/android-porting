@@ -50,6 +50,10 @@ internal static class BundletoolApkSet
             throw new InvalidDataException(available.Length == 0 ? "The APK set contains no supported APK variants."
                 : $"Select one of the available APK set variants: {available}.");
         }
+        Member[] assetSlices = Messages(bytes, 3).Where(IsInstallTimeAssetSet).SelectMany(message => Messages(message, 2))
+            .Where(static description => ReadFields(description).Any(static field => field.Number == 7 && field.Wire == 2))
+            .Select(static description => new Member(ReadText(description, 2), IsBase: false)).ToArray();
+        membersForVariant = [.. membersForVariant, .. assetSlices];
         if (membersForVariant.Count(static member => member.IsBase) != 1
             || membersForVariant.DistinctBy(static member => member.Path, StringComparer.OrdinalIgnoreCase).Count() != membersForVariant.Length)
         {
@@ -66,6 +70,11 @@ internal static class BundletoolApkSet
         return (entries[membersForVariant.Single(static member => member.IsBase).Path],
             membersForVariant.Where(static member => !member.IsBase).OrderBy(static member => member.Path, StringComparer.Ordinal)
                 .Select(member => entries[member.Path]).ToArray());
+    }
+
+    private static bool IsInstallTimeAssetSet(ReadOnlyMemory<byte> assetSet)
+    {
+        return Messages(assetSet, 1).SelectMany(ReadFields).Any(static field => field.Number == 4 && field.Wire == 0 && field.Value == 1);
     }
 
     private static IEnumerable<Member> ReadModule(ReadOnlyMemory<byte> module)

@@ -28,14 +28,16 @@ internal sealed class ZipObbAdapter : IAttachmentAdapter
 
     /// <summary>Maps files below a ZIP path prefix through the shared resource writer.</summary>
     internal static async Task ReadArchiveAsync(string snapshot, string location, string prefix, IAttachmentResourceWriter writer,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool requireFiles = false)
     {
         using ZipArchive archive = ZipFile.OpenRead(snapshot);
+        bool found = false;
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!entry.FullName.EndsWith('/') && entry.FullName.StartsWith(prefix, StringComparison.Ordinal))
             {
+                found = true;
                 try
                 {
                     await using Stream contents = entry.Open();
@@ -46,6 +48,10 @@ internal sealed class ZipObbAdapter : IAttachmentAdapter
                     writer.Report(new("apk.asset-read", DiagnosticSeverity.Error, exception.Message, $"{location}!/{entry.FullName}"));
                 }
             }
+        }
+        if (requireFiles && !found)
+        {
+            throw new InvalidDataException($"The asset pack has no files below '{prefix}'.");
         }
     }
 }

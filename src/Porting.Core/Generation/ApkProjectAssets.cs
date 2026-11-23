@@ -81,11 +81,16 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
                 AttachmentSelection? selection = FindSelection(file, fullPath, selections);
                 requestedFormat = selection?.FormatId;
                 string? target = selection?.ResourcePath;
-                if (selection?.FormatId == LooseAssetAdapter.Id && file.ContainerPath is not null
+                if (selection is not null && file.ContainerPath is not null
                     && !Path.GetFullPath(selection.Path).Equals(fullPath, StringComparison.OrdinalIgnoreCase))
                 {
                     string relativePath = file.OriginalPath.Replace('\\', '/');
-                    target = target == "." ? relativePath : $"{target}/{relativePath}";
+                    target = selection.FormatId switch
+                    {
+                        LooseAssetAdapter.Id when target != "." => $"{target}/{relativePath}",
+                        LooseAssetAdapter.Id or SuppliedAssetPackAdapter.Id => relativePath,
+                        _ => target
+                    };
                 }
                 var key = (fullPath, requestedFormat, target);
                 if (!opened.TryGetValue(key, out decodedFormat))
