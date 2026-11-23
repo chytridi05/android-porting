@@ -12,6 +12,25 @@ public sealed class ApkProjectPorter
     private const string GradleVersion = "8.14.3";
     private const string WrapperSha256 = "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172";
     private const string DistributionSha256 = "bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531";
+    private readonly IReadOnlyList<IAttachmentAdapter> adapters;
+
+    /// <summary>Creates a porter with the built-in attachment adapters.</summary>
+    public ApkProjectPorter() : this([])
+    {
+    }
+
+    /// <summary>Creates a porter with built-in and application-specific attachment adapters.</summary>
+    /// <param name="attachmentAdapters">Additional adapters with unique format identifiers.</param>
+    public ApkProjectPorter(IEnumerable<IAttachmentAdapter> attachmentAdapters)
+    {
+        ArgumentNullException.ThrowIfNull(attachmentAdapters);
+        adapters = new IAttachmentAdapter[] { new ZipObbAdapter() }.Concat(attachmentAdapters).ToArray();
+        if (adapters.Any(static adapter => adapter is null || string.IsNullOrWhiteSpace(adapter.FormatId))
+            || adapters.Select(static adapter => adapter.FormatId).Distinct(StringComparer.Ordinal).Count() != adapters.Count)
+        {
+            throw new ArgumentException("Each attachment adapter must have a unique format identifier.", nameof(attachmentAdapters));
+        }
+    }
 
     /// <summary>Checks recovery and resource mapping without publishing a project.</summary>
     public Task<ApkPortResult> PlanAsync(string apkPath, ApkPortOptions options, CancellationToken cancellationToken = default)
@@ -27,7 +46,7 @@ public sealed class ApkProjectPorter
         return PortAsync(apkPath, Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputDirectory)), options, cancellationToken);
     }
 
-    private static async Task<ApkPortResult> PortAsync(string apkPath, string? output, ApkPortOptions options, CancellationToken cancellationToken)
+    private async Task<ApkPortResult> PortAsync(string apkPath, string? output, ApkPortOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
         ApkInventory inventory = await new ApkInspector().InspectAsync(apkPath, [.. options.CompanionPaths, .. options.ObbPaths], cancellationToken);
@@ -81,7 +100,7 @@ public sealed class ApkProjectPorter
             if (recovered is not null && !HasErrors())
             {
                 string project = Path.Combine(workspace, "project");
-                assets = new(project, diagnostics);
+                assets = new(project, diagnostics, adapters);
                 await assets.ReadAsync(inventory, recovered, options, snapshot, cancellationToken);
                 if (output is not null && !HasErrors())
                 {

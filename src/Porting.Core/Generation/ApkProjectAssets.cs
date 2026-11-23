@@ -1,5 +1,4 @@
 using Porting.Core.Inspection;
-using System.IO.Compression;
 using System.Security.Cryptography;
 
 namespace Porting.Core.Generation;
@@ -11,12 +10,13 @@ internal sealed record PreservedCompanion(ApkInputFile Input, string PreservedPa
 internal sealed record MappedApkResource(ApkInputFile Input, string ResourcePath);
 
 /// <summary>Preserves supplied files and maps APK and ZIP expansion assets into a desktop project.</summary>
-internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diagnostics)
+internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diagnostics, IReadOnlyList<IAttachmentAdapter> adapters)
 {
     private readonly Dictionary<string, MappedApkResource> resources = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> resourceDirectories = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<PreservedCompanion> companions = [];
     private readonly List<MappedApkResource> origins = [];
+    private readonly List<PortDiagnostic> diagnostics = diagnostics;
 
     /// <summary>Gets details of the retained companion files.</summary>
     internal IReadOnlyList<PreservedCompanion> Companions => companions;
@@ -32,7 +32,7 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
         CancellationToken cancellationToken)
     {
         HashSet<string> explicitObbs = new(options.ObbPaths.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
-        HashSet<string> opened = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string?> opened = new(StringComparer.OrdinalIgnoreCase);
         string? version = recovered.VersionCode;
         HashSet<string> conventionalNames = new(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(version))
@@ -43,7 +43,8 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
 
         try
         {
-            await ReadArchiveAsync(snapshot, inventory.ApkPath, isApk: true, cancellationToken);
+            await ZipObbAdapter.ReadArchiveAsync(snapshot, inventory.ApkPath, "assets/",
+                new ResourceWriter(this, inventory.ApkPath), cancellationToken);
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
         {
@@ -57,7 +58,6 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
             string fullPath = file.ContainerPath is null ? file.OriginalPath : Path.Combine(file.ContainerPath, file.OriginalPath);
             string relative = $"porting-inputs/{++index:D4}/contents";
             string destination = Path.Combine(project, relative);
-            bool isObb = explicitObbs.Contains(fullPath) || conventionalNames.Contains(Path.GetFileName(fullPath));
 
             try
             {
@@ -69,29 +69,38 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
                 continue;
             }
 
-            if (isObb && !opened.Contains(fullPath))
+            if (!opened.TryGetValue(fullPath, out string? decodedFormat))
             {
+                AttachmentInput input = new(file, destination, recovered.PackageName, version);
+                string? requestedFormat = explicitObbs.Contains(fullPath) ? ZipObbAdapter.Id : null;
                 try
                 {
-                    await ReadArchiveAsync(destination, fullPath, isApk: false, cancellationToken);
-                    _ = opened.Add(fullPath);
+                    IAttachmentAdapter? adapter = await FindAdapterAsync(input, requestedFormat, cancellationToken);
+                    if (adapter is not null)
+                    {
+                        requestedFormat = adapter.FormatId;
+                        await adapter.ReadAsync(input, new ResourceWriter(this, fullPath), cancellationToken);
+                        decodedFormat = adapter.FormatId;
+                    }
+
+                    opened.Add(fullPath, decodedFormat);
                 }
                 catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
                 {
-                    diagnostics.Add(new("apk.obb-decode", DiagnosticSeverity.Error, $"Could not read the ZIP expansion archive. {exception.Message}", fullPath));
-                    continue;
+                    string code = requestedFormat == ZipObbAdapter.Id ? "apk.obb-decode" : "apk.attachment-decode";
+                    diagnostics.Add(new(code, DiagnosticSeverity.Error, exception.Message, fullPath));
                 }
             }
 
-            companions.Add(new(file, relative, isObb ? "zip-obb" : null));
-            if (!isObb)
+            companions.Add(new(file, relative, decodedFormat));
+            if (opened.ContainsKey(fullPath) && decodedFormat is null)
             {
                 diagnostics.Add(new("apk.companion-preserved", DiagnosticSeverity.Information,
                     "Preserved the original bytes. Provide a ZIP expansion with --obb if the game needs its contents as resources.", fullPath));
             }
         }
 
-        if (recovered.UsesExpansion && !companions.Any(static file => file.DecodedFormat == "zip-obb"))
+        if (recovered.UsesExpansion && !companions.Any(static file => file.DecodedFormat == ZipObbAdapter.Id))
         {
             diagnostics.Add(new("apk.obb-missing", DiagnosticSeverity.Error,
                 $"The Android launcher uses an expansion archive. Supply {string.Join(" or ", conventionalNames.DefaultIfEmpty("the original OBB"))} or use --obb.",
@@ -116,43 +125,33 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
         await CopyAndHashAsync(input, destination, sha256, cancellationToken);
     }
 
-    private async Task ReadArchiveAsync(string snapshot, string container, bool isApk, CancellationToken cancellationToken)
+    private async ValueTask<IAttachmentAdapter?> FindAdapterAsync(AttachmentInput input, string? requestedFormat,
+        CancellationToken cancellationToken)
     {
-        using ZipArchive archive = ZipFile.OpenRead(snapshot);
-        HashSet<string> entries = new(StringComparer.Ordinal);
-        foreach (ZipArchiveEntry entry in archive.Entries)
+        if (requestedFormat is not null)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (entry.FullName.EndsWith('/') || (isApk && !entry.FullName.StartsWith("assets/", StringComparison.Ordinal)))
-            {
-                continue;
-            }
+            return adapters.FirstOrDefault(adapter => adapter.FormatId == requestedFormat)
+                ?? throw new InvalidDataException($"No adapter is registered for '{requestedFormat}'.");
+        }
 
-            string location = $"{container}!/{entry.FullName}";
-            string target = isApk ? entry.FullName["assets/".Length..] : entry.FullName;
-            if (!WindowsArchivePath.IsSafe(target))
+        IAttachmentAdapter? selected = null;
+        foreach (IAttachmentAdapter candidate in adapters)
+        {
+            if (await candidate.RecognizesAsync(input, cancellationToken))
             {
-                diagnostics.Add(new("apk.asset-path", DiagnosticSeverity.Error, "The entry is not a valid relative Windows file path.", location));
-                continue;
-            }
-            if (!entries.Add(entry.FullName))
-            {
-                diagnostics.Add(new("apk.asset-conflict", DiagnosticSeverity.Error, "The archive repeats this resource entry.", location));
-                continue;
-            }
+                if (selected is not null)
+                {
+                    throw new InvalidDataException($"Both '{selected.FormatId}' and '{candidate.FormatId}' recognize this attachment.");
+                }
 
-            try
-            {
-                await ReadResourceAsync(entry, container, target, location, cancellationToken);
-            }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
-            {
-                diagnostics.Add(new("apk.asset-read", DiagnosticSeverity.Error, exception.Message, location));
+                selected = candidate;
             }
         }
+
+        return selected;
     }
 
-    private async Task ReadResourceAsync(ZipArchiveEntry entry, string container, string target, string location,
+    private async Task ReadResourceAsync(string originalPath, string container, string target, long length, Stream input, string location,
         CancellationToken cancellationToken)
     {
         List<string> parents = [];
@@ -168,7 +167,6 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
             return;
         }
 
-        await using Stream input = entry.Open();
         string digest;
         if (resources.TryGetValue(target, out MappedApkResource? previous))
         {
@@ -187,13 +185,49 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
             digest = await CopyAndHashAsync(input, destination, null, cancellationToken);
         }
 
-        MappedApkResource mapped = new(new(entry.FullName, container, entry.Length, digest), target);
+        MappedApkResource mapped = new(new(originalPath, container, length, digest), target);
         _ = resources.TryAdd(target, mapped);
         foreach (string parent in parents)
         {
             _ = resourceDirectories.TryAdd(parent, parent);
         }
         origins.Add(mapped);
+    }
+
+    private sealed class ResourceWriter(ApkProjectAssets owner, string container) : IAttachmentResourceWriter
+    {
+        private readonly HashSet<(string OriginalPath, string ResourcePath)> entries = [];
+
+        /// <inheritdoc />
+        public async Task WriteAsync(string originalPath, string resourcePath, long length, Stream contents, CancellationToken cancellationToken)
+        {
+            string location = $"{container}!/{originalPath}";
+            if (!WindowsArchivePath.IsSafe(resourcePath))
+            {
+                Report(new("apk.asset-path", DiagnosticSeverity.Error, "The entry is not a valid relative Windows file path.", location));
+                return;
+            }
+            if (!entries.Add((originalPath, resourcePath)))
+            {
+                Report(new("apk.asset-conflict", DiagnosticSeverity.Error, "The attachment repeats this resource entry.", location));
+                return;
+            }
+
+            try
+            {
+                await owner.ReadResourceAsync(originalPath, container, resourcePath, length, contents, location, cancellationToken);
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
+            {
+                Report(new("apk.asset-read", DiagnosticSeverity.Error, exception.Message, location));
+            }
+        }
+
+        /// <inheritdoc />
+        public void Report(PortDiagnostic diagnostic)
+        {
+            owner.diagnostics.Add(diagnostic);
+        }
     }
 
     private static async Task<string> CopyAndHashAsync(Stream input, string destination, string? expected,
