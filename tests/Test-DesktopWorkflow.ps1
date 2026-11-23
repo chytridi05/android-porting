@@ -48,34 +48,7 @@ function Assert-WindowTitle([Diagnostics.Process] $Process, [string] $Title) {
 
 function Assert-KotlinPlaythrough([Diagnostics.Process] $Process, [string] $Title) {
     if (!('Porting.Verification.WindowInput' -as [type])) {
-        Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-
-namespace Porting.Verification
-{
-    public static class WindowInput
-    {
-        [DllImport("user32.dll", EntryPoint = "MapVirtualKeyW")]
-        private static extern uint MapVirtualKey(uint key, uint mode);
-
-        [DllImport("user32.dll", EntryPoint = "PostMessageW")]
-        private static extern bool PostMessage(IntPtr window, uint message, IntPtr key, IntPtr flags);
-
-        public static bool Press(IntPtr window, int key)
-        {
-            uint down = 1 | (MapVirtualKey((uint)key, 0) << 16);
-            if (key is >= 0x25 and <= 0x28)
-            {
-                down |= 1u << 24;
-            }
-
-            return PostMessage(window, 0x0100, new IntPtr(key), new IntPtr(down))
-                && PostMessage(window, 0x0101, new IntPtr(key), new IntPtr(down | (3u << 30)));
-        }
-    }
-}
-'@
+        Add-Type -Path (Join-Path $PSScriptRoot 'verification/WindowInput.cs')
     }
 
     foreach ($key in @(0x27, 0x26, 0x26, 0x26, 0x27, 0x27, 0x27, 0x27)) {

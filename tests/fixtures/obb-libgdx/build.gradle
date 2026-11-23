@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application' version '8.10.1'
+}
+
+android {
+    namespace 'fixture.route'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'fixture.route'
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName '1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+
+    sourceSets.main.jniLibs.srcDir(layout.buildDirectory.dir('android-natives'))
+}
+
+configurations {
+    nativeX64
+}
+
+dependencies {
+    implementation 'com.badlogicgames.gdx:gdx:1.14.1'
+    implementation 'com.badlogicgames.gdx:gdx-backend-android:1.14.1'
+    nativeX64 'com.badlogicgames.gdx:gdx-platform:1.14.1:natives-x86_64'
+}
+
+def copyNativeLibraries = tasks.register('copyNativeLibraries', Sync) {
+    from(configurations.nativeX64.elements.map { artifacts -> artifacts.collect { zipTree(it.asFile) } }) {
+        include '**/*.so'
+    }
+    into(layout.buildDirectory.dir('android-natives/x86_64'))
+}
+
+tasks.named('preBuild') {
+    dependsOn(copyNativeLibraries)
+}
