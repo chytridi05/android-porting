@@ -117,6 +117,7 @@ internal static class ApkSourceRecovery
         string? launcherDirectory = launcherFile is null ? null : Path.GetDirectoryName(launcherFile);
         List<string> sources = [];
         bool box2D = false;
+        string? stagedDexPrefix = features is null ? null : $"/* loaded from: {Path.Combine(workspace, "split-dex")}{Path.DirectorySeparatorChar}";
         HashSet<string> sourceCandidates = new(Directory.EnumerateFiles(sourceDirectory, "*.java", SearchOption.AllDirectories), StringComparer.OrdinalIgnoreCase);
         if (features is not null)
         {
@@ -160,6 +161,11 @@ internal static class ApkSourceRecovery
             }
 
             box2D |= contents.Contains("com.badlogic.gdx.physics.box2d", StringComparison.Ordinal);
+            if (stagedDexPrefix is not null && contents.Contains(stagedDexPrefix, StringComparison.Ordinal))
+            {
+                string stableSource = contents.Replace(stagedDexPrefix, "/* loaded from: split-dex/", StringComparison.Ordinal);
+                await File.WriteAllTextAsync(file, stableSource, cancellationToken);
+            }
             sources.Add(file);
         }
 
