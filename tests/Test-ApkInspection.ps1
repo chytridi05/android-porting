@@ -114,6 +114,9 @@ Assert-Cli @('inspect', $native, '--companion', $truncatedRsb, '--companion', $i
 Assert-Cli @('plan', $native, '--companion', $rsb, '--jadx', $unavailableJadx) 1 @(
     "RSB v4, 1 resource groups  $rsb", 'Error apk.engine-unsupported:'
 )
+Assert-Cli @('plan', $native, '--obb', $rsb, '--jadx', $unavailableJadx) 1 @(
+    "RSB v4, 1 resource groups  $rsb", 'Error apk.obb-decode:', 'Error apk.engine-unsupported:'
+)
 
 if ((Get-FileHash -LiteralPath $apkPath).Hash -ne $apkHash -or
     (Get-FileHash -LiteralPath $loose).Hash -ne $looseHash -or

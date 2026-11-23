@@ -10,6 +10,7 @@ internal static class ApkPreflight
     internal static async Task<bool> CheckAsync(string snapshot, ApkInventory inventory, IReadOnlyList<ApkSplitSnapshot> splits, IReadOnlyList<string> obbPaths,
         R8Mapping? mapping, List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
     {
+        bool expanded = CheckExplicitExpansions(obbPaths, diagnostics, cancellationToken);
         bool supported = await HasLibGdxReferencesAsync(snapshot, cancellationToken);
         foreach (ApkSplitSnapshot split in splits)
         {
@@ -27,30 +28,36 @@ internal static class ApkPreflight
                 $"The supplied APKs lack recognizable libGDX references in their DEX code.{evidence} Supply the libGDX APK and any required splits.", inventory.ApkPath));
         }
 
+        return supported && expanded;
+    }
+
+    private static bool CheckExplicitExpansions(IReadOnlyList<string> obbPaths, List<PortDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        bool valid = true;
         foreach (string path in obbPaths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (Directory.Exists(path))
             {
                 diagnostics.Add(new("apk.obb-file", DiagnosticSeverity.Error, "Supply a ZIP expansion file with --obb.", path));
-                supported = false;
+                valid = false;
                 continue;
             }
 
             try
             {
-                using ZipArchive archive = ZipFile.OpenRead(path);
-                _ = archive.Entries.Count;
+                ZipObbAdapter.CheckArchive(path);
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
             {
                 diagnostics.Add(new("apk.obb-decode", DiagnosticSeverity.Error,
                     $"Supply a readable ZIP expansion archive or provide a ZIP export of the required resources. {exception.Message}", path));
-                supported = false;
+                valid = false;
             }
         }
 
-        return supported;
+        return valid;
     }
 
     private static async Task<bool> HasLibGdxReferencesAsync(string snapshot, CancellationToken cancellationToken)

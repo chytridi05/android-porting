@@ -8,13 +8,19 @@ internal sealed record RsbBundleHeader(uint Version, uint InformationLength, uin
     internal const uint SupportedVersion = 4;
     private const int HeaderLength = 0x70;
 
+    /// <summary>Checks the on-disk signature without assuming a supported layout.</summary>
+    internal static bool HasSignature(ReadOnlySpan<byte> prefix)
+    {
+        return prefix.Length >= 4 && prefix[..4].SequenceEqual("1bsr"u8);
+    }
+
     /// <summary>Reads the bundle header without decoding any resource groups.</summary>
     /// <exception cref="InvalidDataException">The file has an RSB signature but its header is incomplete or inconsistent.</exception>
     internal static async ValueTask<RsbBundleHeader?> ProbeAsync(Stream input, CancellationToken cancellationToken)
     {
         byte[] header = new byte[HeaderLength];
         int read = await input.ReadAtLeastAsync(header.AsMemory(0, 8), 8, false, cancellationToken);
-        if (read < 4 || !header.AsSpan(0, 4).SequenceEqual("1bsr"u8))
+        if (!HasSignature(header.AsSpan(0, read)))
         {
             return null;
         }
