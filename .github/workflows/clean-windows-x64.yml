@@ -104,7 +104,7 @@ jobs:
           $checksums = foreach ($app in @('Cli', 'Desktop')) {
               $name = "Porting.$app"
               $published = Join-Path $env:RUNNER_TEMP "$name-published"
-              dotnet publish "src/$name/$name.csproj" -c Release -r win-x64 -p:Platform=x64 --self-contained true -o $published
+              dotnet publish "src/$name/$name.csproj" -c Release -r win-x64 -p:Platform=x64 --self-contained true -o $published | Out-Host
               $zip = Join-Path $releaseDirectory "$name-win-x64.zip"
               $installed = Join-Path $env:RUNNER_TEMP "$name & extracted"
               [IO.Compression.ZipFile]::CreateFromDirectory($published, $zip)
@@ -121,6 +121,9 @@ jobs:
               Write-Host "$name $version ($digest)"
               "PORTING_TEST_$($app.ToUpperInvariant())=$exe" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
               "$digest  $([IO.Path]::GetFileName($zip))"
+          }
+          if ($checksums.Count -ne 2 -or ($checksums -cnotmatch '^[0-9a-f]{64}  Porting\.(Cli|Desktop)-win-x64\.zip$')) {
+              throw 'Expected one SHA-256 checksum line per release ZIP.'
           }
           $checksums | Set-Content -LiteralPath (Join-Path $releaseDirectory 'SHA256SUMS.txt') -Encoding ascii
           "PORTING_RELEASE_DIRECTORY=$releaseDirectory" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
