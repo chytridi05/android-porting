@@ -65,9 +65,11 @@ function Assert-PackagedRoute([string] $Name, [string] $Project, [string] $Route
     }
 
     $profile = [IO.Directory]::CreateDirectory((Join-Path $root "$Name profile")).FullName
-    $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $image 'AttachmentRoute.exe'))
+    $executable = Join-Path $image 'AttachmentRoute.exe'
+    $start = [Diagnostics.ProcessStartInfo]::new($executable)
     $start.WorkingDirectory = $profile
     $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
     $start.Environment.Clear()
     $start.Environment['SystemRoot'] = $env:SystemRoot
     $start.Environment['WINDIR'] = $env:SystemRoot
@@ -77,20 +79,44 @@ function Assert-PackagedRoute([string] $Name, [string] $Project, [string] $Route
         $start.Environment[$entry.Key] = [IO.Directory]::CreateDirectory((Join-Path $profile $entry.Value)).FullName
     }
     if ($SoftwareOpenGlDirectory) { $start.Environment['GALLIUM_DRIVER'] = 'llvmpipe' }
-    $process = [Diagnostics.Process]::Start($start)
+    $launcher = [Diagnostics.Process]::Start($start)
+    $process = $null
     try {
-        Wait-RouteTitle $process "Attachment Route Ready $Route"
+        $deadline = [DateTime]::UtcNow.AddSeconds(20)
+        do {
+            $process = Get-Process -Name 'AttachmentRoute' -ErrorAction SilentlyContinue | Where-Object {
+                $_.Path -ieq $executable -and $_.MainWindowTitle -ceq "Attachment Route Ready $Route"
+            } | Select-Object -First 1
+            if (!$process) { Start-Sleep -Milliseconds 100 }
+        } while (!$process -and [DateTime]::UtcNow -lt $deadline)
+        if (!$process) { throw "The packaged executable did not open the route '$Route'." }
+        $expectedJvm = Join-Path $image 'runtime/bin/server/jvm.dll'
+        if (!($process.Modules | Where-Object FileName -IEQ $expectedJvm)) {
+            throw 'The game did not load the bundled Java VM.'
+        }
+
         for ($index = 0; $index -lt $Route.Length; $index++) {
             $key = if ($Route[$index] -ceq 'R') { 0x27 } else { 0x26 }
             if (![Porting.Verification.WindowInput]::Press($process.MainWindowHandle, $key)) { throw 'Keyboard input failed.' }
             $expected = if ($index + 1 -lt $Route.Length) { "Attachment Route Step $($index + 1)" } else { "Attachment Route Complete $Route" }
             Wait-RouteTitle $process $expected
         }
+        if (!$process.CloseMainWindow() -or !$launcher.WaitForExit(10000) -or $launcher.ExitCode -ne 0) {
+            throw 'The packaged game did not exit cleanly.'
+        }
         Write-Output "$Name completed route $Route from the Windows x64 package."
     }
     finally {
-        if (!$process.HasExited -and (!$process.CloseMainWindow() -or !$process.WaitForExit(5000))) { $process.Kill() }
-        $process.Dispose()
+        if (!$launcher.HasExited) {
+            $launcher.Kill($true)
+            $launcher.WaitForExit()
+        }
+        if ($process -and !$process.HasExited) {
+            $process.Kill($true)
+            $process.WaitForExit()
+        }
+        if ($process) { $process.Dispose() }
+        $launcher.Dispose()
     }
 }
 
