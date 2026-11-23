@@ -18,4 +18,13 @@ public sealed record ApkInventory(
     ApkInputFile? Package,
     IReadOnlyList<ApkInputFile> Entries,
     IReadOnlyList<ApkInputFile> Companions,
-    IReadOnlyList<PortDiagnostic> Diagnostics);
+    IReadOnlyList<PortDiagnostic> Diagnostics)
+{
+    /// <summary>Gets the split APKs and their entries, in input order.</summary>
+    public IReadOnlyList<ApkSplitInventory> Splits { get; init; } = [];
+}
+
+/// <summary>Records the original bytes and entries of a supplied split APK.</summary>
+/// <param name="File">The split APK file identity.</param>
+/// <param name="Entries">The files read from the split APK.</param>
+public sealed record ApkSplitInventory(ApkInputFile File, IReadOnlyList<ApkInputFile> Entries);

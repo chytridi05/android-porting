@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using Porting.Core.Generation;
 
 namespace Porting.Core.Inspection;
 
@@ -11,8 +12,22 @@ public sealed class ApkInspector
     /// <param name="companionPaths">Companion files or directories to inventory.</param>
     /// <param name="cancellationToken">Cancels reads and hashing.</param>
     /// <returns>The readable input inventory and any failures encountered.</returns>
-    public async Task<ApkInventory> InspectAsync(string apkPath, IReadOnlyList<string> companionPaths,
+    public Task<ApkInventory> InspectAsync(string apkPath, IReadOnlyList<string> companionPaths,
         CancellationToken cancellationToken = default)
+    {
+        return InspectInputsAsync(apkPath, companionPaths, [], cancellationToken);
+    }
+
+    /// <summary>Inventories the base APK, selected splits, and attachments for a port.</summary>
+    public Task<ApkInventory> InspectPortAsync(string apkPath, ApkPortOptions options, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        string[] companions = options.GetCompanionPaths().Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        return InspectInputsAsync(apkPath, companions, options.SplitPaths, cancellationToken);
+    }
+
+    private static async Task<ApkInventory> InspectInputsAsync(string apkPath, IReadOnlyList<string> companionPaths,
+        IReadOnlyList<string> splitPaths, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(apkPath);
         ArgumentNullException.ThrowIfNull(companionPaths);
@@ -22,13 +37,14 @@ public sealed class ApkInspector
         List<PortDiagnostic> diagnostics = [];
         List<ApkInputFile> entries = [];
         List<ApkInputFile> companions = [];
+        List<ApkSplitInventory> splits = [];
         ApkInputFile? package = null;
         try
         {
             await using FileStream input = OpenFile(fullApkPath);
             package = await ReadFileAsync(input, input.Length, fullApkPath, null, cancellationToken);
             input.Position = 0;
-            await ReadArchiveAsync(input, fullApkPath, entries, diagnostics, cancellationToken);
+            await ReadArchiveAsync(input, fullApkPath, entries, diagnostics, requireDex: true, cancellationToken);
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException)
         {
@@ -40,11 +56,38 @@ public sealed class ApkInspector
             await ReadCompanionAsync(Path.GetFullPath(path), null, companions, diagnostics, cancellationToken);
         }
 
-        return new(fullApkPath, package, entries.AsReadOnly(), companions.AsReadOnly(), diagnostics.AsReadOnly());
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase) { fullApkPath };
+        foreach (string path in splitPaths.Select(Path.GetFullPath).Order(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!seen.Add(path))
+            {
+                diagnostics.Add(new("apk.split-conflict", DiagnosticSeverity.Error, "Each APK can be supplied only once.", path));
+                continue;
+            }
+
+            try
+            {
+                await using FileStream input = OpenFile(path);
+                ApkInputFile file = await ReadFileAsync(input, input.Length, path, null, cancellationToken);
+                input.Position = 0;
+                List<ApkInputFile> splitEntries = [];
+                await ReadArchiveAsync(input, path, splitEntries, diagnostics, requireDex: false, cancellationToken);
+                splits.Add(new(file, splitEntries.AsReadOnly()));
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException)
+            {
+                diagnostics.Add(new("apk.split-read", DiagnosticSeverity.Error, exception.Message, path));
+            }
+        }
+
+        return new(fullApkPath, package, entries.AsReadOnly(), companions.AsReadOnly(), diagnostics.AsReadOnly())
+        {
+            Splits = splits.AsReadOnly()
+        };
     }
 
     private static async Task ReadArchiveAsync(Stream input, string apkPath, List<ApkInputFile> files,
-        List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
+        List<PortDiagnostic> diagnostics, bool requireDex, CancellationToken cancellationToken)
     {
         using ZipArchive archive = new(input, ZipArchiveMode.Read, leaveOpen: true);
         HashSet<string> names = new(StringComparer.Ordinal);
@@ -89,7 +132,7 @@ public sealed class ApkInspector
                 "Choose an Android APK containing a root AndroidManifest.xml.", apkPath));
         }
 
-        if (!names.Contains("classes.dex"))
+        if (requireDex && !names.Contains("classes.dex"))
         {
             diagnostics.Add(new("apk.dex-missing", DiagnosticSeverity.Error,
                 "Choose the base APK containing application DEX code.", apkPath));

@@ -18,6 +18,9 @@ public sealed record ApkPortOptions(
     /// <summary>Gets explicit format and resource selections for additional attachments.</summary>
     public IReadOnlyList<AttachmentSelection> Attachments { get; init; } = [];
 
+    /// <summary>Gets additional split APK paths supplied with the base.</summary>
+    public IReadOnlyList<string> SplitPaths { get; init; } = [];
+
     /// <summary>Enumerates the originals that must be inventoried and kept outside the export directory.</summary>
     public IEnumerable<string> GetCompanionPaths()
     {

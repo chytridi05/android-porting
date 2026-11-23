@@ -29,7 +29,7 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
 
     /// <summary>Copies companions and unpacks assets using Windows-safe relative paths.</summary>
     internal async Task ReadAsync(ApkInventory inventory, RecoveredApk recovered, ApkPortOptions options, string snapshot,
-        CancellationToken cancellationToken)
+        IReadOnlyList<ApkSplitSnapshot> splits, CancellationToken cancellationToken)
     {
         ILookup<string, AttachmentSelection> selections = options.ObbPaths.Select(static path => new AttachmentSelection(path, ZipObbAdapter.Id))
             .Concat(options.Attachments).ToLookup(static selection => Path.TrimEndingDirectorySeparator(Path.GetFullPath(selection.Path)),
@@ -43,14 +43,16 @@ internal sealed class ApkProjectAssets(string project, List<PortDiagnostic> diag
             conventionalNames.Add($"patch.{version}.{recovered.PackageName}.obb");
         }
 
-        try
+        foreach ((string path, string location) in splits.Select(static split => (split.SnapshotPath, split.Location)).Prepend((snapshot, inventory.ApkPath)))
         {
-            await ZipObbAdapter.ReadArchiveAsync(snapshot, inventory.ApkPath, "assets/",
-                new ResourceWriter(this, inventory.ApkPath), cancellationToken);
-        }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
-        {
-            diagnostics.Add(new("apk.assets-read", DiagnosticSeverity.Error, exception.Message, inventory.ApkPath));
+            try
+            {
+                await ZipObbAdapter.ReadArchiveAsync(path, location, "assets/", new ResourceWriter(this, location), cancellationToken);
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException)
+            {
+                diagnostics.Add(new("apk.assets-read", DiagnosticSeverity.Error, exception.Message, location));
+            }
         }
 
         int index = 0;

@@ -7,10 +7,14 @@ namespace Porting.Core.Generation;
 internal static class ApkPreflight
 {
     /// <summary>Reports unsupported inputs without recovering their application source.</summary>
-    internal static async Task<bool> CheckAsync(string snapshot, ApkInventory inventory, IReadOnlyList<string> obbPaths,
+    internal static async Task<bool> CheckAsync(string snapshot, ApkInventory inventory, IReadOnlyList<ApkSplitSnapshot> splits, IReadOnlyList<string> obbPaths,
         List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
     {
         bool supported = await HasLibGdxReferencesAsync(snapshot, cancellationToken);
+        foreach (ApkSplitSnapshot split in splits)
+        {
+            supported = supported || await HasLibGdxReferencesAsync(split.SnapshotPath, cancellationToken);
+        }
         if (!supported)
         {
             string[] libraries = inventory.Entries.Select(static entry => entry.OriginalPath)
@@ -18,7 +22,7 @@ internal static class ApkPreflight
                 .Select(static path => Path.GetFileName(path)).Distinct(StringComparer.Ordinal).Take(4).ToArray();
             string evidence = libraries.Length == 0 ? "" : $" Android native libraries include {string.Join(", ", libraries)}.";
             diagnostics.Add(new("apk.engine-unsupported", DiagnosticSeverity.Error,
-                $"The APK lacks recognizable libGDX references in its DEX code.{evidence} Supply a standalone libGDX APK.", inventory.ApkPath));
+                $"The supplied APKs lack recognizable libGDX references in their DEX code.{evidence} Supply the libGDX APK and any required splits.", inventory.ApkPath));
         }
 
         foreach (string path in obbPaths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
@@ -52,9 +56,7 @@ internal static class ApkPreflight
         int overlap = "Lcom/badlogic/gdx/"u8.Length - 1;
         byte[] buffer = new byte[65536 + overlap];
         using ZipArchive archive = ZipFile.OpenRead(snapshot);
-        foreach (ZipArchiveEntry entry in archive.Entries.Where(static entry =>
-            entry.FullName.StartsWith("classes", StringComparison.Ordinal) && entry.FullName.EndsWith(".dex", StringComparison.Ordinal)
-            && !entry.FullName.Contains('/')))
+        foreach (ZipArchiveEntry entry in archive.Entries.Where(static entry => ApkDex.IsDexEntry(entry.FullName)))
         {
             cancellationToken.ThrowIfCancellationRequested();
             await using Stream input = entry.Open();

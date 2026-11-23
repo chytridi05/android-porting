@@ -161,7 +161,7 @@ namespace Porting.Desktop
             string apk = ReadPath(ApkPath);
             if (ReadOptions() is ApkPortOptions options)
             {
-                await RunAsync("Inspecting APK", token => inspector.InspectAsync(apk, options.GetCompanionPaths().ToArray(), token), ShowInventory);
+                await RunAsync("Inspecting APK", token => inspector.InspectPortAsync(apk, options, token), ShowInventory);
             }
         }
 
@@ -223,7 +223,8 @@ namespace Porting.Desktop
                 attachments.Where(static item => item.IsObb).Select(static item => item.Path).ToArray(),
                 ReadLines(RequiredAssets), Optional(ReadPath(JadxJar)), Optional(ReadPath(GradleHome)), Optional(EntryType.Text.Trim()))
             {
-                Attachments = mappings.AsReadOnly()
+                Attachments = mappings.AsReadOnly(),
+                SplitPaths = ReadLines(SplitApks).Select(UnquotePath).ToArray()
             };
 
             static string? Optional(string value) => value.Length == 0 ? null : value;
@@ -248,9 +249,11 @@ namespace Porting.Desktop
         {
             IEnumerable<InventoryItem> entries = inventory.Entries.Select(static item => new InventoryItem("APK entry", item));
             IEnumerable<InventoryItem> companions = inventory.Companions.Select(static item => new InventoryItem("Companion", item));
+            IEnumerable<InventoryItem> splits = inventory.Splits.SelectMany(static split =>
+                split.Entries.Select(static entry => new InventoryItem("Split entry", entry)).Prepend(new("Split APK", split.File)));
             Inventory.ItemsSource = inventory.Package is ApkInputFile package
-                ? new[] { new InventoryItem("APK", package) }.Concat(companions).Concat(entries).ToArray()
-                : companions.Concat(entries).ToArray();
+                ? new[] { new InventoryItem("APK", package) }.Concat(companions).Concat(entries).Concat(splits).ToArray()
+                : companions.Concat(entries).Concat(splits).ToArray();
             Finish(inventory.Diagnostics, $"APK: {inventory.ApkPath}\nArchive entries: {inventory.Entries.Count}\n"
                 + $"Companion files: {inventory.Companions.Count}", InventoryTab);
         }

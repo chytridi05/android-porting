@@ -20,8 +20,8 @@ internal static class ApkSourceRecovery
     private static readonly Regex AndroidImport = new(@"(?m)^\s*import\s+(?:static\s+)?(?:android\.|androidx\.|com\.badlogic\.gdx\.backends\.android\.)");
 
     /// <summary>Recovers a supported no-argument libGDX game entry and its Java source tree.</summary>
-    internal static async Task<RecoveredApk?> RecoverAsync(string apk, string originalPath, string workspace, ApkPortOptions options,
-        List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
+    internal static async Task<RecoveredApk?> RecoverAsync(string apk, string originalPath, IReadOnlyList<ApkSplitSnapshot> splits,
+        string workspace, ApkPortOptions options, List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
     {
         string? jadx = options.JadxJar ?? Environment.GetEnvironmentVariable("PORTING_JADX_JAR");
         if (string.IsNullOrWhiteSpace(jadx) || !File.Exists(jadx))
@@ -33,57 +33,58 @@ internal static class ApkSourceRecovery
 
         string? javaHome = Environment.GetEnvironmentVariable("JAVA_HOME");
         string java = string.IsNullOrWhiteSpace(javaHome) ? "java.exe" : Path.Combine(javaHome.Trim().Trim('"'), "bin", "java.exe");
-        ProcessStartInfo start = ProcessRunner.CreateStartInfo(java, workspace);
         string decoded = Path.Combine(workspace, "decoded");
-        foreach (string argument in new[] { "-cp", Path.GetFullPath(jadx), "jadx.cli.JadxCLI", "--threads-count", "4",
-            "--log-level", "error", "-d", decoded, apk })
+        XElement? manifest = null;
+        ApkSplitDex? features = null;
+        if (splits.Count > 0)
         {
-            start.ArgumentList.Add(argument);
+            manifest = await DecodeManifestAsync(apk, originalPath, "manifest-base");
+            if (manifest is null || !CheckBaseManifest(manifest, originalPath, diagnostics))
+            {
+                return null;
+            }
+
+            List<(XElement Manifest, string Location)> manifests = [];
+            foreach (ApkSplitSnapshot split in splits)
+            {
+                XElement? splitManifest = await DecodeManifestAsync(split.SnapshotPath, split.Location, $"manifest-{manifests.Count:D4}");
+                if (splitManifest is null)
+                {
+                    return null;
+                }
+
+                manifests.Add((splitManifest, split.Location));
+            }
+
+            if (!ApkSplitSet.Validate(manifest, originalPath, manifests, diagnostics))
+            {
+                return null;
+            }
+
+            features = await ApkSplitSet.StageDexAsync(apk, originalPath, splits, workspace, diagnostics, cancellationToken);
+            if (diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+            {
+                return null;
+            }
         }
 
-        int exitCode;
-        using StringWriter log = new();
-        using StringWriter errors = new();
-        try
+        (int ExitCode, string Log)? run = await RunJadxAsync(decoded, originalPath, [apk, .. features?.Paths ?? []]);
+        if (run is null)
         {
-            exitCode = await ProcessRunner.RunAsync(start, log, errors, cancellationToken);
-        }
-        catch (Win32Exception exception)
-        {
-            diagnostics.Add(new("apk.jadx-start", DiagnosticSeverity.Error,
-                $"Set JAVA_HOME to a supported JDK. {exception.Message}", originalPath));
             return null;
         }
-
-        string manifestPath = Path.Combine(decoded, "resources", "AndroidManifest.xml");
-        if (!File.Exists(manifestPath))
+        int exitCode = run.Value.ExitCode;
+        if (manifest is null)
         {
-            diagnostics.Add(new("apk.manifest-decode", DiagnosticSeverity.Error,
-                $"JADX did not decode the manifest (exit {exitCode}). {(log.ToString() + errors).Trim()}",
-                $"{originalPath}!/AndroidManifest.xml"));
-            return null;
+            manifest = await ReadManifestAsync(decoded, originalPath, exitCode, run.Value.Log, diagnostics, cancellationToken);
+            if (manifest is null || !CheckBaseManifest(manifest, originalPath, diagnostics)
+                || !ApkSplitSet.Validate(manifest, originalPath, [], diagnostics))
+            {
+                return null;
+            }
         }
 
-        XElement? manifest;
-        try
-        {
-            await using FileStream input = File.OpenRead(manifestPath);
-            manifest = (await XDocument.LoadAsync(input, LoadOptions.None, cancellationToken)).Root;
-        }
-        catch (XmlException exception)
-        {
-            diagnostics.Add(new("apk.manifest-decode", DiagnosticSeverity.Error, exception.Message, $"{originalPath}!/AndroidManifest.xml"));
-            return null;
-        }
-
-        if (manifest is null || (string?)manifest.Attribute("package") is not string package || !IsTypeName(package)
-            || manifest.Attribute("split") is not null || (string?)manifest.Attribute(Android + "isSplitRequired") == "true")
-        {
-            diagnostics.Add(new("apk.manifest-package", DiagnosticSeverity.Error,
-                "Supply a standalone base APK with a valid Android application ID.", $"{originalPath}!/AndroidManifest.xml"));
-            return null;
-        }
-
+        string package = (string)manifest.Attribute("package")!;
         string javaRoot = Path.Combine(decoded, "sources");
         string[] launchers = FindLaunchers(manifest, package);
         string? launcher = launchers.Length == 1 ? launchers[0] : null;
@@ -113,7 +114,24 @@ internal static class ApkSourceRecovery
         string? launcherDirectory = launcherFile is null ? null : Path.GetDirectoryName(launcherFile);
         List<string> sources = [];
         bool box2D = false;
-        foreach (string file in Directory.EnumerateFiles(sourceDirectory, "*.java", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+        HashSet<string> sourceCandidates = new(Directory.EnumerateFiles(sourceDirectory, "*.java", SearchOption.AllDirectories), StringComparer.OrdinalIgnoreCase);
+        if (features is not null)
+        {
+            foreach (string type in features.Types.Where(IsTypeName))
+            {
+                string source = JavaPath(javaRoot, type);
+                if (File.Exists(source))
+                {
+                    _ = sourceCandidates.Add(source);
+                }
+                else if (!type.Contains('$'))
+                {
+                    diagnostics.Add(new("apk.split-source", DiagnosticSeverity.Error,
+                        $"JADX did not recover the split class '{type}'.", originalPath));
+                }
+            }
+        }
+        foreach (string file in sourceCandidates.Order(StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (file.Equals(launcherFile, StringComparison.OrdinalIgnoreCase)
@@ -150,6 +168,75 @@ internal static class ApkSourceRecovery
 
         return new(package, (string?)manifest.Attribute(Android + "versionCode"), entry, version, box2D,
             launcherText.Contains("setAPKExpansion(", StringComparison.Ordinal), javaRoot, sources.AsReadOnly());
+
+        async Task<XElement?> DecodeManifestAsync(string input, string location, string name)
+        {
+            string directory = Path.Combine(workspace, name);
+            (int ExitCode, string Log)? decodedManifest = await RunJadxAsync(directory, location, ["--no-src", input]);
+            return decodedManifest is { } result
+                ? await ReadManifestAsync(directory, location, result.ExitCode, result.Log, diagnostics, cancellationToken)
+                : null;
+        }
+
+        async Task<(int ExitCode, string Log)?> RunJadxAsync(string directory, string location, IReadOnlyList<string> arguments)
+        {
+            ProcessStartInfo start = ProcessRunner.CreateStartInfo(java, workspace);
+            foreach (string argument in new[] { "-cp", Path.GetFullPath(jadx), "jadx.cli.JadxCLI", "--threads-count", "4",
+                "--log-level", "error", "-d", directory }.Concat(arguments))
+            {
+                start.ArgumentList.Add(argument);
+            }
+
+            using StringWriter log = new();
+            using StringWriter errors = new();
+            try
+            {
+                int result = await ProcessRunner.RunAsync(start, log, errors, cancellationToken);
+                return (result, (log.ToString() + errors).Trim());
+            }
+            catch (Win32Exception exception)
+            {
+                diagnostics.Add(new("apk.jadx-start", DiagnosticSeverity.Error,
+                    $"Set JAVA_HOME to a supported JDK. {exception.Message}", location));
+                return null;
+            }
+        }
+    }
+
+    private static bool CheckBaseManifest(XElement manifest, string location, List<PortDiagnostic> diagnostics)
+    {
+        if (manifest.Name == "manifest" && (string?)manifest.Attribute("package") is string package
+            && IsTypeName(package) && manifest.Attribute("split") is null)
+        {
+            return true;
+        }
+
+        diagnostics.Add(new("apk.manifest-package", DiagnosticSeverity.Error,
+            "Supply a base APK with a valid Android application ID.", $"{location}!/AndroidManifest.xml"));
+        return false;
+    }
+
+    private static async Task<XElement?> ReadManifestAsync(string decoded, string location, int exitCode, string log,
+        List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
+    {
+        string manifest = Path.Combine(decoded, "resources", "AndroidManifest.xml");
+        try
+        {
+            if (File.Exists(manifest))
+            {
+                await using FileStream input = File.OpenRead(manifest);
+                return (await XDocument.LoadAsync(input, LoadOptions.None, cancellationToken)).Root;
+            }
+
+            diagnostics.Add(new("apk.manifest-decode", DiagnosticSeverity.Error,
+                $"JADX did not decode the manifest (exit {exitCode}). {log}", $"{location}!/AndroidManifest.xml"));
+        }
+        catch (XmlException exception)
+        {
+            diagnostics.Add(new("apk.manifest-decode", DiagnosticSeverity.Error, exception.Message, $"{location}!/AndroidManifest.xml"));
+        }
+
+        return null;
     }
 
     private static string[] FindLaunchers(XElement manifest, string package)

@@ -92,8 +92,11 @@
 
             <Expander x:Name="PortOptionsPanel" Header="APK port options" Margin="0,14,0,0">
               <StackPanel Margin="0,8,0,0">
+                <Label Content="Split APKs, one path per line" Target="{Binding ElementName=SplitApks}" Style="{StaticResource FieldLabel}" />
+                <TextBox x:Name="SplitApks" AcceptsReturn="True" MinHeight="58" MaxHeight="112" VerticalContentAlignment="Top"
+                         VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Split APKs" />
                 <Label Content="Required assets, one path per line" Target="{Binding ElementName=RequiredAssets}"
-                       Style="{StaticResource FieldLabel}" />
+                       Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
                 <TextBox x:Name="RequiredAssets" AcceptsReturn="True" MinHeight="62" MaxHeight="112"
                          VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
                          AutomationProperties.Name="Required assets" />

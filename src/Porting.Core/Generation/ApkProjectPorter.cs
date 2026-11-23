@@ -50,7 +50,7 @@ public sealed class ApkProjectPorter
     {
         ArgumentNullException.ThrowIfNull(options);
         string[] companionPaths = options.GetCompanionPaths().Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        ApkInventory inventory = await new ApkInspector().InspectAsync(apkPath, companionPaths, cancellationToken);
+        ApkInventory inventory = await new ApkInspector().InspectPortAsync(apkPath, options, cancellationToken);
         List<PortDiagnostic> diagnostics = [.. inventory.Diagnostics];
         RecoveredApk? recovered = null;
         ApkProjectAssets? assets = null;
@@ -92,24 +92,35 @@ public sealed class ApkProjectPorter
             }
 
             string snapshot = Path.Combine(workspace, "input.apk");
+            string project = Path.Combine(workspace, "project");
             await ApkProjectAssets.CopyCheckedFileAsync(inventory.ApkPath, snapshot, inventory.Package.Sha256, cancellationToken);
-            if (await ApkPreflight.CheckAsync(snapshot, inventory, options.ObbPaths, diagnostics, cancellationToken))
+            List<ApkSplitSnapshot> splits = [];
+            foreach (ApkSplitInventory split in inventory.Splits)
             {
-                recovered = await ApkSourceRecovery.RecoverAsync(snapshot, inventory.ApkPath, workspace, options, diagnostics, cancellationToken);
+                string preservedPath = $"porting-inputs/splits/{splits.Count + 1:D4}.apk";
+                string copy = Path.Combine(project, preservedPath);
+                location = split.File.OriginalPath;
+                await ApkProjectAssets.CopyCheckedFileAsync(location, copy, split.File.Sha256, cancellationToken);
+                splits.Add(new(split.File, copy, preservedPath));
+            }
+
+            location = inventory.ApkPath;
+            if (await ApkPreflight.CheckAsync(snapshot, inventory, splits, options.ObbPaths, diagnostics, cancellationToken))
+            {
+                recovered = await ApkSourceRecovery.RecoverAsync(snapshot, inventory.ApkPath, splits, workspace, options, diagnostics, cancellationToken);
             }
 
             if (recovered is not null && !HasErrors())
             {
-                string project = Path.Combine(workspace, "project");
                 assets = new(project, diagnostics, adapters);
-                await assets.ReadAsync(inventory, recovered, options, snapshot, cancellationToken);
+                await assets.ReadAsync(inventory, recovered, options, snapshot, splits, cancellationToken);
                 if (output is not null && !HasErrors())
                 {
                     location = output;
                     string? gradleHome = options.GradleHome ?? Environment.GetEnvironmentVariable("GRADLE_HOME");
                     if (await WriteWrapperAsync(project, gradleHome, diagnostics, cancellationToken))
                     {
-                        await WriteProjectAsync(project, inventory, recovered, assets, cancellationToken);
+                        await WriteProjectAsync(project, inventory, recovered, assets, splits, cancellationToken);
                         cancellationToken.ThrowIfCancellationRequested();
                         Directory.Move(project, output);
                         published = output;
@@ -205,7 +216,7 @@ public sealed class ApkProjectPorter
     }
 
     private static async Task WriteProjectAsync(string project, ApkInventory inventory, RecoveredApk recovered, ApkProjectAssets assets,
-        CancellationToken cancellationToken)
+        IReadOnlyList<ApkSplitSnapshot> splits, CancellationToken cancellationToken)
     {
         foreach (string file in recovered.SourceFiles)
         {
@@ -235,11 +246,12 @@ public sealed class ApkProjectPorter
         await using FileStream provenance = File.Open(Path.Combine(project, "porting-apk-inputs.json"), FileMode.CreateNew, FileAccess.Write);
         await JsonSerializer.SerializeAsync(provenance, new
         {
-            formatVersion = 1,
+            formatVersion = 2,
             inventory.Package,
             recovered.PackageName,
             recovered.EntryType,
             Companions = assets.Companions,
+            Splits = splits.Select(static split => new { split.File, split.PreservedPath }),
             Resources = assets.Resources,
             RuntimeUse = "unverified"
         }, OutputProjectMetadata.JsonOptions, cancellationToken);

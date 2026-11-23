@@ -115,7 +115,7 @@ namespace Porting.Cli
         private static async Task<int> RunApkInspectAsync(string source, string[] args, CancellationToken cancellationToken)
         {
             ApkPortOptions options = ReadApkPortOptions(args.AsSpan(2));
-            ApkInventory inventory = await new ApkInspector().InspectAsync(source, options.GetCompanionPaths().ToArray(), cancellationToken);
+            ApkInventory inventory = await new ApkInspector().InspectPortAsync(source, options, cancellationToken);
             Console.WriteLine($"APK: {inventory.ApkPath}");
             if (inventory.Package is ApkInputFile package)
             {
@@ -129,6 +129,12 @@ namespace Porting.Cli
                 .Where(static path => path.StartsWith("assets/", StringComparison.Ordinal)).ToArray());
             WriteList("Native libraries", inventory.Entries.Select(static entry => entry.OriginalPath)
                 .Where(static path => path.StartsWith("lib/", StringComparison.Ordinal)).ToArray());
+            if (inventory.Splits.Count > 0)
+            {
+                WriteList("Split APKs", inventory.Splits.Select(static split => $"{split.File.Sha256}  {split.File.OriginalPath}").ToArray());
+                WriteList("Split entries", inventory.Splits.SelectMany(static split => split.Entries)
+                    .Select(static entry => $"{entry.Sha256}  {entry.ContainerPath}!/{entry.OriginalPath}").ToArray());
+            }
             WriteList("Companion files", inventory.Companions.Select(static file => file.ContainerPath is null
                 ? $"{file.Sha256}  {file.OriginalPath}"
                 : $"{file.Sha256}  {file.ContainerPath}!/{file.OriginalPath}").ToArray());
@@ -165,6 +171,7 @@ namespace Porting.Cli
             List<string> expansions = [];
             List<string> assets = [];
             List<AttachmentSelection> attachments = [];
+            List<string> splits = [];
             Dictionary<string, string> values = new(StringComparer.Ordinal);
             for (int index = 0; index < args.Length; index++)
             {
@@ -173,6 +180,9 @@ namespace Porting.Cli
                 {
                     case "--companion":
                         companions.Add(ReadValue(args, ref index));
+                        break;
+                    case "--split":
+                        splits.Add(ReadValue(args, ref index));
                         break;
                     case "--obb":
                         expansions.Add(ReadValue(args, ref index));
@@ -202,7 +212,11 @@ namespace Porting.Cli
             }
 
             return new(companions, expansions, assets, values.GetValueOrDefault("--jadx"),
-                values.GetValueOrDefault("--gradle-home"), values.GetValueOrDefault("--entry")) { Attachments = attachments.AsReadOnly() };
+                values.GetValueOrDefault("--gradle-home"), values.GetValueOrDefault("--entry"))
+            {
+                Attachments = attachments.AsReadOnly(),
+                SplitPaths = splits.AsReadOnly()
+            };
         }
 
         private async Task<int> RunBuildAsync(string[] args, CancellationToken cancellationToken)
@@ -389,6 +403,7 @@ namespace Porting.Cli
                 Console.WriteLine();
                 Console.WriteLine("APK options:");
                 Console.WriteLine("  --companion <path>       Preserve a supplied file or directory. Repeat to add more.");
+                Console.WriteLine("  --split <apk>            Include a matching split APK. Repeat to add more.");
                 Console.WriteLine("  --obb <file>             Use a supplied file as a ZIP expansion archive. Repeat to add more.");
                 Console.WriteLine("  --map-asset <path> <resource>  Map a file or directory. Use '.' to map a directory at the resource root.");
                 Console.WriteLine("  --require-asset <path>   Require a case-sensitive resource path. Repeat to add more.");
