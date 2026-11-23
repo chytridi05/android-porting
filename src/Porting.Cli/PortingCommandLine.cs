@@ -55,15 +55,15 @@ namespace Porting.Cli
                     return await RunPackageAsync(args, cancellationToken);
                 }
 
-                string source = ReadRequiredArgument(args, 1,
-                    command == "inspect" ? "source project directory or APK" : "source project directory");
-                if (command == "inspect" && Path.GetExtension(source).Equals(".apk", StringComparison.OrdinalIgnoreCase)
-                    && !Directory.Exists(source))
+                string source = ReadRequiredArgument(args, 1, "source project directory or APK");
+                string? output = command == "generate" ? ReadRequiredArgument(args, 2, "output project directory") : null;
+                if (Path.GetExtension(source).Equals(".apk", StringComparison.OrdinalIgnoreCase) && !Directory.Exists(source))
                 {
-                    return await RunApkInspectAsync(source, args, cancellationToken);
+                    return command == "inspect"
+                        ? await RunApkInspectAsync(source, args, cancellationToken)
+                        : await RunApkPortAsync(source, output, args.AsMemory(output is null ? 2 : 3), cancellationToken);
                 }
 
-                string? output = command == "generate" ? ReadRequiredArgument(args, 2, "output project directory") : null;
                 PortOptions? options = command == "inspect" ? null : ReadPortOptions(args.AsSpan(output is null ? 2 : 3));
                 if (command == "inspect" && args.Length > 2)
                 {
@@ -145,6 +145,67 @@ namespace Porting.Cli
             return WriteDiagnostics(inventory.Diagnostics);
         }
 
+        private static async Task<int> RunApkPortAsync(string source, string? output, ReadOnlyMemory<string> args,
+            CancellationToken cancellationToken)
+        {
+            ApkPortOptions options = ReadApkPortOptions(args.Span);
+            ApkProjectPorter porter = new();
+            ApkPortResult result = output is null
+                ? await porter.PlanAsync(source, options, cancellationToken)
+                : await porter.GenerateAsync(source, output, options, cancellationToken);
+            if (result.PackageName is not null)
+            {
+                Console.WriteLine($"Android package: {result.PackageName}");
+                Console.WriteLine($"Desktop game entry: {result.EntryType}");
+                Console.WriteLine($"libGDX version: {result.LibGdxVersion}");
+                Console.WriteLine($"Recovered source files: {result.SourceFiles}");
+                Console.WriteLine($"Mapped resources: {result.Resources}");
+            }
+            if (result.OutputDirectory is string project)
+            {
+                Console.WriteLine($"Generated project: {project}");
+            }
+
+            return WriteDiagnostics(result.Diagnostics);
+        }
+
+        private static ApkPortOptions ReadApkPortOptions(ReadOnlySpan<string> args)
+        {
+            List<string> companions = [];
+            List<string> expansions = [];
+            List<string> assets = [];
+            Dictionary<string, string> values = new(StringComparer.Ordinal);
+            for (int index = 0; index < args.Length; index++)
+            {
+                string option = args[index];
+                switch (option)
+                {
+                    case "--companion":
+                        companions.Add(ReadValue(args, ref index));
+                        break;
+                    case "--obb":
+                        expansions.Add(ReadValue(args, ref index));
+                        break;
+                    case "--require-asset":
+                        assets.Add(ReadValue(args, ref index));
+                        break;
+                    case "--entry":
+                    case "--jadx":
+                    case "--gradle-home":
+                        if (!values.TryAdd(option, ReadValue(args, ref index)))
+                        {
+                            throw new FormatException($"Option '{option}' can only be used once.");
+                        }
+                        break;
+                    default:
+                        throw new FormatException($"Unknown APK port option '{option}'.");
+                }
+            }
+
+            return new(companions, expansions, assets, values.GetValueOrDefault("--jadx"),
+                values.GetValueOrDefault("--gradle-home"), values.GetValueOrDefault("--entry"));
+        }
+
         private async Task<int> RunBuildAsync(string[] args, CancellationToken cancellationToken)
         {
             string project = ReadRequiredArgument(args, 1, "generated project directory");
@@ -164,8 +225,26 @@ namespace Porting.Cli
         {
             string project = ReadRequiredArgument(args, 1, "generated project directory");
             string archive = ReadRequiredArgument(args, 2, "output ZIP path");
-            bool offline = ReadOfflineOption(args, 3);
-            PackageResult package = await packager.PackageAsync(project, archive, offline, Console.Out, Console.Error, cancellationToken);
+            bool offline = false;
+            string? applicationName = null;
+            for (int index = 3; index < args.Length; index++)
+            {
+                switch (args[index])
+                {
+                    case "--offline" when !offline:
+                        offline = true;
+                        break;
+                    case "--exe" when applicationName is null:
+                        applicationName = ReadValue(args, ref index);
+                        break;
+                    default:
+                        throw new FormatException($"Unexpected argument '{args[index]}'.");
+                }
+            }
+
+            PackageResult package = applicationName is null
+                ? await packager.PackageAsync(project, archive, offline, Console.Out, Console.Error, cancellationToken)
+                : await packager.PackageExecutableAsync(project, archive, applicationName, offline, Console.Out, Console.Error, cancellationToken);
             int exitCode = WriteDiagnostics(package.Diagnostics);
             if (exitCode == 0)
             {
@@ -281,11 +360,13 @@ namespace Porting.Cli
             if (command is null or "plan")
             {
                 Console.WriteLine("  Porting.Cli plan <source-directory> [options]");
+                Console.WriteLine("  Porting.Cli plan <apk> [APK options]");
             }
 
             if (command is null or "generate")
             {
                 Console.WriteLine("  Porting.Cli generate <source-directory> <output-directory> [options]");
+                Console.WriteLine("  Porting.Cli generate <apk> <output-directory> [APK options]");
             }
 
             if (command is null or "build")
@@ -294,7 +375,7 @@ namespace Porting.Cli
             }
             if (command is null or "package")
             {
-                Console.WriteLine("  Porting.Cli package <output-directory> <output-zip> [--offline]");
+                Console.WriteLine("  Porting.Cli package <output-directory> <output-zip> [--offline] [--exe <name>]");
             }
 
             if (command is null or "plan" or "generate")
@@ -306,6 +387,14 @@ namespace Porting.Cli
                 Console.WriteLine("  --no-assets          Use an empty asset list.");
                 Console.WriteLine("  --width <pixels>     Override the initial window width (1280 by default).");
                 Console.WriteLine("  --height <pixels>    Override the initial window height (720 by default).");
+                Console.WriteLine();
+                Console.WriteLine("APK options:");
+                Console.WriteLine("  --companion <path>       Preserve a supplied file or directory. Repeat to add more.");
+                Console.WriteLine("  --obb <file>             Use a supplied file as a ZIP expansion archive. Repeat to add more.");
+                Console.WriteLine("  --require-asset <path>   Require a case-sensitive resource path. Repeat to add more.");
+                Console.WriteLine("  --entry <type>          Override the recovered libGDX entry type.");
+                Console.WriteLine("  --jadx <jar>             Use the JADX CLI JAR. Defaults to PORTING_JADX_JAR.");
+                Console.WriteLine("  --gradle-home <path>     Use an unpacked Gradle 8.14.3 distribution. Defaults to GRADLE_HOME.");
             }
 
             Console.WriteLine();
@@ -322,7 +411,8 @@ namespace Porting.Cli
             if (command is null or "package")
             {
                 Console.WriteLine("Package installs the Gradle desktop application and bundles a runtime from the Windows x64 JDK in JAVA_HOME.");
-                Console.WriteLine("Use --offline to resolve dependencies from the Gradle cache. Extract the ZIP and run Launch.cmd on Windows x64.");
+                Console.WriteLine("Use --exe <name> to create an application executable with jpackage. Otherwise the ZIP includes Launch.cmd.");
+                Console.WriteLine("Use --offline to resolve dependencies from the Gradle cache.");
             }
 
             Console.WriteLine("Exit codes: 0 success, 1 operation failed, 2 invalid arguments, 130 canceled.");

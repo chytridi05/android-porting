@@ -56,11 +56,14 @@ $archive = [IO.Compression.ZipFile]::Open($duplicate, [IO.Compression.ZipArchive
 try {
     $null = $archive.CreateEntry('classes.dex')
     $null = $archive.CreateEntry('classes.dex')
+    $null = $archive.CreateEntry('assets/CON')
 }
 finally {
     $archive.Dispose()
 }
-Assert-Cli @('inspect', $duplicate) 1 @('Error apk.entry-conflict:', "$duplicate!/classes.dex", 'Error apk.manifest-missing:')
+Assert-Cli @('inspect', $duplicate) 1 @(
+    'Error apk.entry-conflict:', "$duplicate!/classes.dex", 'Error apk.manifest-missing:', 'Error apk.archive-path:', "$duplicate!/assets/CON"
+)
 
 if ((Get-FileHash -LiteralPath $apkPath).Hash -ne $apkHash -or
     (Get-FileHash -LiteralPath $loose).Hash -ne $looseHash -or

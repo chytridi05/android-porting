@@ -78,11 +78,7 @@ namespace Porting.Core.Generation
                     await WriteDesktopModuleAsync(plan, layout, staging, cancellationToken);
                 }
 
-                await using (FileStream manifest = File.Open(Path.Combine(staging, OutputProjectMetadata.FileName), FileMode.CreateNew, FileAccess.Write))
-                {
-                    OutputProjectMetadata metadata = new(OutputProjectMetadata.CurrentVersion, plan.DesktopModulePath);
-                    await JsonSerializer.SerializeAsync(manifest, metadata, OutputProjectMetadata.JsonOptions, cancellationToken);
-                }
+                await WriteProjectMetadataAsync(staging, plan.DesktopModulePath, cancellationToken);
 
                 cancellationToken.ThrowIfCancellationRequested();
                 Directory.Move(staging, output);
@@ -121,13 +117,15 @@ namespace Porting.Core.Generation
                 $"The output path '{output}' already exists. Choose a new directory or build the existing project copy.");
         }
 
-        private static bool IsAtOrBelow(string root, string path)
+        /// <summary>Tests whether an absolute path equals or is contained by the given root.</summary>
+        internal static bool IsAtOrBelow(string root, string path)
         {
             string relative = Path.GetRelativePath(root, path);
             return relative != ".." && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
         }
 
-        private static void VerifyDirectoryAncestors(string directory)
+        /// <summary>Rejects links and junctions in a path used to stage or publish generated files.</summary>
+        internal static void VerifyDirectoryAncestors(string directory)
         {
             for (DirectoryInfo? current = new(directory); current is not null; current = current.Parent)
             {
@@ -174,7 +172,8 @@ namespace Porting.Core.Generation
             }
         }
 
-        private static async Task WriteDesktopModuleAsync(PortPlan plan, Lwjgl3Layout layout, string directory, CancellationToken cancellationToken)
+        /// <summary>Writes the LWJGL3 application into a project with the selected shared module.</summary>
+        internal static async Task WriteDesktopModuleAsync(PortPlan plan, Lwjgl3Layout layout, string directory, CancellationToken cancellationToken)
         {
             string module = Path.Combine(directory, Lwjgl3Layout.DirectoryName);
             if (Path.Exists(module))
@@ -191,6 +190,14 @@ namespace Porting.Core.Generation
             string contents = await File.ReadAllTextAsync(settings, cancellationToken);
             string newline = contents.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
             await File.AppendAllTextAsync(settings, $"{newline}include(\"{Lwjgl3Layout.ModulePath}\"){newline}", cancellationToken);
+        }
+
+        /// <summary>Writes the entry used by build and package to select the desktop module.</summary>
+        internal static async Task WriteProjectMetadataAsync(string directory, string desktopModule, CancellationToken cancellationToken)
+        {
+            await using FileStream manifest = File.Open(Path.Combine(directory, OutputProjectMetadata.FileName), FileMode.CreateNew, FileAccess.Write);
+            OutputProjectMetadata metadata = new(OutputProjectMetadata.CurrentVersion, desktopModule);
+            await JsonSerializer.SerializeAsync(manifest, metadata, OutputProjectMetadata.JsonOptions, cancellationToken);
         }
     }
 }

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection.PortableExecutable;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Porting.Core.Packaging
 {
@@ -31,6 +32,7 @@ namespace Porting.Core.Packaging
                         metadata.setText(JsonOutput.toJson([
                             mainClass: launcher.mainClass.orNull,
                             mainModule: launcher.mainModule.orNull,
+                            mainJar: desktop.tasks.named('jar').get().archiveFile.get().asFile.name,
                             jvmOptions: launcher.defaultJvmOpts ?: [],
                             libraries: launcher.classpath.files.collect { it.name }
                         ]), 'UTF-8')
@@ -50,8 +52,22 @@ namespace Porting.Core.Packaging
             """;
 
         /// <inheritdoc />
-        public async Task<PackageResult> PackageAsync(string projectDirectory, string archivePath, bool offline = false,
+        public Task<PackageResult> PackageAsync(string projectDirectory, string archivePath, bool offline = false,
             TextWriter? standardOutput = null, TextWriter? standardError = null, CancellationToken cancellationToken = default)
+        {
+            return PackageAsync(projectDirectory, archivePath, null, offline, standardOutput, standardError, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        public Task<PackageResult> PackageExecutableAsync(string projectDirectory, string archivePath, string applicationName, bool offline = false,
+            TextWriter? standardOutput = null, TextWriter? standardError = null, CancellationToken cancellationToken = default)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
+            return PackageAsync(projectDirectory, archivePath, applicationName, offline, standardOutput, standardError, cancellationToken);
+        }
+
+        private static async Task<PackageResult> PackageAsync(string projectDirectory, string archivePath, string? applicationName, bool offline,
+            TextWriter? standardOutput, TextWriter? standardError, CancellationToken cancellationToken)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(projectDirectory);
             ArgumentException.ThrowIfNullOrWhiteSpace(archivePath);
@@ -64,6 +80,10 @@ namespace Porting.Core.Packaging
             if (Path.Exists(archive))
             {
                 return ArchiveExists();
+            }
+            if (applicationName is not null && !Regex.IsMatch(applicationName, @"\A[A-Za-z][A-Za-z0-9_-]{0,63}\z"))
+            {
+                return Failed("application-name", "Choose an executable name starting with an ASCII letter, with up to 64 letters, digits, hyphens, or underscores.");
             }
 
             DirectoryInfo? staging = null;
@@ -78,10 +98,15 @@ namespace Porting.Core.Packaging
 
                 string jdk = Path.GetFullPath(javaHome.Trim().Trim('"'));
                 string jlink = Path.Combine(jdk, "bin", "jlink.exe");
+                string jpackage = Path.Combine(jdk, "bin", "jpackage.exe");
                 string modules = Path.Combine(jdk, "jmods");
                 if (!File.Exists(jlink) || !Directory.Exists(modules) || !IsX64Executable(Path.Combine(jdk, "bin", "java.exe")))
                 {
                     return Failed("jdk-missing", $"Set JAVA_HOME to a compatible Windows x64 JDK with jlink and a jmods directory. Checked '{jdk}'.");
+                }
+                if (applicationName is not null && !IsX64Executable(jpackage))
+                {
+                    return Failed("jpackage-missing", "Set JAVA_HOME to a Windows x64 JDK with jpackage.exe.");
                 }
 
                 staging = Directory.CreateTempSubdirectory("porting-package-");
@@ -106,6 +131,10 @@ namespace Porting.Core.Packaging
                 {
                     return Failed("distribution", "Configure a classpath-based Gradle application with a main class and runtime libraries in lib/.");
                 }
+                if (applicationName is not null && (launcher.MainJar is null || !launcher.Libraries.Contains(launcher.MainJar, StringComparer.Ordinal)))
+                {
+                    return Failed("main-jar", "The Gradle application JAR must be installed in lib/ to create an executable.");
+                }
 
                 string runtime = Path.Combine(application, "runtime");
                 string launchScript = Path.Combine(application, "Launch.cmd");
@@ -128,10 +157,44 @@ namespace Porting.Core.Packaging
                     return Failed("runtime", $"jlink did not produce a Windows x64 Java runtime. Exit code: {result}. See the package output.");
                 }
 
-                string classpath = string.Join(';', launcher.Libraries.Select(static library => $"lib/{library}"));
-                string[] arguments = [.. launcher.JvmOptions ?? [], "-classpath", classpath, launcher.MainClass];
-                await File.WriteAllLinesAsync(launchArguments, arguments.Select(QuoteJavaArgument), cancellationToken);
-                await File.WriteAllTextAsync(launchScript, LaunchScript.ReplaceLineEndings("\r\n") + "\r\n", cancellationToken);
+                string archiveSource = application;
+                if (applicationName is not null)
+                {
+                    string imageDirectory = Path.Combine(staging.FullName, "image");
+                    ProcessStartInfo image = ProcessRunner.CreateStartInfo(jpackage, staging.FullName);
+                    foreach (string argument in new[]
+                    {
+                        "--type", "app-image",
+                        "--input", Path.Combine(application, "lib"),
+                        "--main-jar", launcher.MainJar!,
+                        "--main-class", launcher.MainClass,
+                        "--runtime-image", runtime,
+                        "--name", applicationName,
+                        "--dest", imageDirectory
+                    })
+                    {
+                        image.ArgumentList.Add(argument);
+                    }
+                    foreach (string option in launcher.JvmOptions ?? [])
+                    {
+                        image.ArgumentList.Add("--java-options");
+                        image.ArgumentList.Add(QuoteJavaArgument(option));
+                    }
+
+                    result = await ProcessRunner.RunAsync(image, standardOutput, standardError, cancellationToken);
+                    archiveSource = Path.Combine(imageDirectory, applicationName);
+                    if (result != 0 || !IsX64Executable(Path.Combine(archiveSource, applicationName + ".exe")))
+                    {
+                        return Failed("executable", $"jpackage did not produce the Windows x64 application. Exit code: {result}. See the package output.");
+                    }
+                }
+                else
+                {
+                    string classpath = string.Join(';', launcher.Libraries.Select(static library => $"lib/{library}"));
+                    string[] arguments = [.. launcher.JvmOptions ?? [], "-classpath", classpath, launcher.MainClass];
+                    await File.WriteAllLinesAsync(launchArguments, arguments.Select(QuoteJavaArgument), cancellationToken);
+                    await File.WriteAllTextAsync(launchScript, LaunchScript.ReplaceLineEndings("\r\n") + "\r\n", cancellationToken);
+                }
 
                 string archiveDirectory = Path.GetDirectoryName(archive)!;
                 _ = Directory.CreateDirectory(archiveDirectory);
@@ -139,7 +202,7 @@ namespace Porting.Core.Packaging
                 await using (FileStream zip = File.Open(stagedPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
                     temporaryArchive = stagedPath;
-                    await ZipFile.CreateFromDirectoryAsync(application, zip, CompressionLevel.Optimal, includeBaseDirectory: false, cancellationToken);
+                    await ZipFile.CreateFromDirectoryAsync(archiveSource, zip, CompressionLevel.Optimal, includeBaseDirectory: false, cancellationToken);
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -216,6 +279,6 @@ namespace Porting.Core.Packaging
             }
         }
 
-        private sealed record LaunchMetadata(string? MainClass, string? MainModule, string[]? JvmOptions, string[] Libraries);
+        private sealed record LaunchMetadata(string? MainClass, string? MainModule, string? MainJar, string[]? JvmOptions, string[] Libraries);
     }
 }

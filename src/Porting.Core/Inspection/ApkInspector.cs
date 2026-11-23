@@ -51,7 +51,15 @@ public sealed class ApkInspector
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (entry.Name.Length == 0)
+            bool directory = entry.FullName.EndsWith('/');
+            string path = directory ? entry.FullName[..^1] : entry.FullName;
+            if (!WindowsArchivePath.IsSafe(path))
+            {
+                diagnostics.Add(new("apk.archive-path", DiagnosticSeverity.Error,
+                    "The APK contains an entry that cannot be safely recovered to Windows.", $"{apkPath}!/{entry.FullName}"));
+                continue;
+            }
+            if (directory)
             {
                 continue;
             }
