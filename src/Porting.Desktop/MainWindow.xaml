@@ -1,0 +1,220 @@
+<Window x:Class="Porting.Desktop.MainWindow"
+        x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Android Porting" Width="1160" Height="760" MinWidth="800" MinHeight="560"
+        WindowStartupLocation="CenterScreen" FontFamily="Segoe UI" FontSize="14"
+        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="12,5" />
+      <Setter Property="Margin" Value="0,0,8,0" />
+      <Setter Property="MinHeight" Value="30" />
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Padding" Value="5,3" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style x:Key="FieldLabel" TargetType="Label">
+      <Setter Property="Padding" Value="0,0,0,4" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style x:Key="ResultGrid" TargetType="DataGrid">
+      <Setter Property="AutoGenerateColumns" Value="False" />
+      <Setter Property="IsReadOnly" Value="True" />
+      <Setter Property="CanUserAddRows" Value="False" />
+      <Setter Property="HeadersVisibility" Value="Column" />
+      <Setter Property="GridLinesVisibility" Value="Horizontal" />
+      <Setter Property="SelectionUnit" Value="CellOrRowHeader" />
+      <Setter Property="ClipboardCopyMode" Value="IncludeHeader" />
+    </Style>
+    <Style x:Key="WrappedCell" TargetType="TextBlock">
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Padding" Value="4,3" />
+    </Style>
+  </Window.Resources>
+
+  <Grid Margin="20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="5*" MinWidth="335" />
+      <ColumnDefinition Width="16" />
+      <ColumnDefinition Width="6*" MinWidth="335" />
+    </Grid.ColumnDefinitions>
+
+    <StackPanel Grid.ColumnSpan="3" Margin="0,0,0,16">
+      <TextBlock Text="Android Porting" FontSize="25" FontWeight="SemiBold" />
+      <TextBlock Text="Port a libGDX APK to an editable Windows x64 project." Margin="0,3,0,0" />
+    </StackPanel>
+
+    <TabControl x:Name="Workflow" Grid.Row="1">
+      <TabItem x:Name="ApkTab" Header="APK input">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="12">
+            <Label Content="_APK file" Target="{Binding ElementName=ApkPath}" Style="{StaticResource FieldLabel}" />
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Browse…" Click="BrowseApk"
+                      AutomationProperties.Name="Browse for APK" />
+              <TextBox x:Name="ApkPath" AutomationProperties.Name="APK file" />
+            </DockPanel>
+
+            <Label Content="_Companion files and folders" Target="{Binding ElementName=Attachments}"
+                   Margin="0,15,0,0" Style="{StaticResource FieldLabel}" />
+            <ListView x:Name="Attachments" Height="105" SelectionMode="Extended"
+                      AutomationProperties.Name="Companion files and folders"
+                      ScrollViewer.HorizontalScrollBarVisibility="Auto">
+              <ListView.View>
+                <GridView>
+                  <GridViewColumn Header="Type" Width="90" DisplayMemberBinding="{Binding Type}" />
+                  <GridViewColumn Header="Path" DisplayMemberBinding="{Binding Path}" />
+                </GridView>
+              </ListView.View>
+            </ListView>
+            <WrapPanel Margin="0,6,0,0">
+              <Button Content="Add files…" Click="BrowseFiles" />
+              <Button Content="Add folder…" Click="BrowseFolder" />
+              <Button Content="Add ZIP OBB…" Click="BrowseObb" />
+              <Button x:Name="RemoveAttachmentButton" Content="Remove selected" Click="RemoveAttachments" />
+            </WrapPanel>
+            <DockPanel Margin="0,6,0,0">
+              <WrapPanel DockPanel.Dock="Right" Margin="6,0,0,0">
+                <Button x:Name="AddCompanionButton" Content="Add path" Click="AddCompanionPath" />
+                <Button x:Name="AddObbButton" Margin="0" Content="As ZIP OBB" Click="AddObbPath" />
+              </WrapPanel>
+              <TextBox x:Name="CompanionPath" AutomationProperties.Name="Companion path"
+                       ToolTip="Paste a companion file or directory path." />
+            </DockPanel>
+
+            <Expander x:Name="PortOptionsPanel" Header="APK port options" Margin="0,14,0,0">
+              <StackPanel Margin="0,8,0,0">
+                <Label Content="Required assets, one path per line" Target="{Binding ElementName=RequiredAssets}"
+                       Style="{StaticResource FieldLabel}" />
+                <TextBox x:Name="RequiredAssets" AcceptsReturn="True" MinHeight="62" MaxHeight="112"
+                         VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
+                         AutomationProperties.Name="Required assets" />
+                <Label Content="Game entry class" Target="{Binding ElementName=EntryType}"
+                       Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
+                <TextBox x:Name="EntryType" AutomationProperties.Name="Game entry class" />
+                <Label Content="JADX CLI JAR" Target="{Binding ElementName=JadxJar}"
+                       Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Browse…" Click="BrowseJadx"
+                          AutomationProperties.Name="Browse for JADX JAR" />
+                  <TextBox x:Name="JadxJar" AutomationProperties.Name="JADX CLI JAR"
+                           ToolTip="Defaults to PORTING_JADX_JAR." />
+                </DockPanel>
+                <Label Content="Gradle distribution folder" Target="{Binding ElementName=GradleHome}"
+                       Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Browse…" Click="BrowseGradle"
+                          AutomationProperties.Name="Browse for Gradle folder" />
+                  <TextBox x:Name="GradleHome" AutomationProperties.Name="Gradle distribution folder"
+                           ToolTip="Defaults to GRADLE_HOME." />
+                </DockPanel>
+              </StackPanel>
+            </Expander>
+
+            <Label Content="New project folder" Target="{Binding ElementName=OutputPath}"
+                   Margin="0,15,0,0" Style="{StaticResource FieldLabel}" />
+            <TextBox x:Name="OutputPath" AutomationProperties.Name="New project folder"
+                     ToolTip="Enter a path for the new project. The folder must not already exist." />
+            <WrapPanel Margin="0,12,0,0">
+              <Button x:Name="InspectButton" Content="_Inspect" Click="InspectApk" />
+              <Button x:Name="PlanButton" Content="_Plan port" Click="PlanApk" />
+              <Button x:Name="GenerateButton" Content="_Generate project" Click="GenerateApk" />
+            </WrapPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem x:Name="BuildTab" Header="Build and package">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="12">
+            <Label Content="Editable project folder" Target="{Binding ElementName=ProjectPath}"
+                   Style="{StaticResource FieldLabel}" />
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Browse…" Click="BrowseProject"
+                      AutomationProperties.Name="Browse for editable project" />
+              <TextBox x:Name="ProjectPath" AutomationProperties.Name="Editable project folder" />
+            </DockPanel>
+            <CheckBox x:Name="Offline" Content="Use Gradle offline mode" Margin="0,12,0,0" />
+            <Button x:Name="BuildButton" Content="_Build project" Click="BuildProject"
+                    HorizontalAlignment="Left" Margin="0,12,0,0" />
+
+            <Separator Margin="0,14" />
+            <Label Content="Output ZIP" Target="{Binding ElementName=ArchivePath}" Style="{StaticResource FieldLabel}" />
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Browse…" Click="BrowseArchive"
+                      AutomationProperties.Name="Browse for output ZIP" />
+              <TextBox x:Name="ArchivePath" AutomationProperties.Name="Output ZIP" />
+            </DockPanel>
+            <CheckBox x:Name="UseExecutable" Content="Create a Windows executable" IsChecked="True" Margin="0,12,0,0" />
+            <Label Content="Executable name" Target="{Binding ElementName=ExecutableName}"
+                   Margin="0,8,0,0" Style="{StaticResource FieldLabel}" />
+            <TextBox x:Name="ExecutableName" Text="Game" AutomationProperties.Name="Executable name"
+                     IsEnabled="{Binding IsChecked, ElementName=UseExecutable}" />
+            <Button x:Name="PackageButton" Content="_Package ZIP" Click="PackageProject"
+                    HorizontalAlignment="Left" Margin="0,12,0,0" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+    </TabControl>
+
+    <Grid Grid.Row="1" Grid.Column="2">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+      <TextBox x:Name="Summary" Text="Choose an APK to inspect, or open an editable project to build."
+               IsReadOnly="True" TextWrapping="Wrap" MaxHeight="125" VerticalScrollBarVisibility="Auto"
+               Padding="6" Margin="0,0,0,8" AutomationProperties.Name="Operation summary" />
+      <TabControl x:Name="Results" Grid.Row="1">
+        <TabItem x:Name="DiagnosticsTab" Header="Diagnostics">
+          <DataGrid x:Name="Diagnostics" Style="{StaticResource ResultGrid}" AutomationProperties.Name="Diagnostics">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="80" />
+              <DataGridTextColumn Header="Code" Binding="{Binding Code}" Width="145" />
+              <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="2*" MinWidth="140"
+                                  ElementStyle="{StaticResource WrappedCell}" />
+              <DataGridTextColumn Header="Location" Binding="{Binding RelativePath}" Width="*" MinWidth="100"
+                                  ElementStyle="{StaticResource WrappedCell}" />
+              <DataGridTextColumn Header="Line" Binding="{Binding LineNumber}" Width="44" />
+            </DataGrid.Columns>
+          </DataGrid>
+        </TabItem>
+        <TabItem x:Name="InventoryTab" Header="Inventory">
+          <DataGrid x:Name="Inventory" Style="{StaticResource ResultGrid}" AutomationProperties.Name="APK inventory">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="100" />
+              <DataGridTextColumn Header="Path" Binding="{Binding Input.OriginalPath}" Width="*" MinWidth="150"
+                                  ElementStyle="{StaticResource WrappedCell}" />
+              <DataGridTextColumn Header="Container" Binding="{Binding Input.ContainerPath}" Width="*" MinWidth="125"
+                                  ElementStyle="{StaticResource WrappedCell}" />
+              <DataGridTextColumn Header="SHA-256" Binding="{Binding Input.Sha256}" Width="275"
+                                  ElementStyle="{StaticResource WrappedCell}" />
+            </DataGrid.Columns>
+          </DataGrid>
+        </TabItem>
+        <TabItem x:Name="LogTab" Header="Gradle log">
+          <TextBox x:Name="GradleLog" FontFamily="Consolas" FontSize="12" IsReadOnly="True"
+                   VerticalContentAlignment="Top" HorizontalScrollBarVisibility="Auto"
+                   VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Gradle log" />
+        </TabItem>
+      </TabControl>
+    </Grid>
+
+    <DockPanel Grid.Row="2" Grid.ColumnSpan="3" Margin="0,10,0,0">
+      <Button x:Name="CancelButton" DockPanel.Dock="Right" Content="_Cancel" Margin="8,0,0,0"
+              IsEnabled="False" Click="CancelOperation" />
+      <ProgressBar x:Name="Progress" DockPanel.Dock="Right" Width="110" Height="5" Margin="10,0,0,0"
+                   Visibility="Hidden" AutomationProperties.Name="Operation progress" />
+      <TextBlock x:Name="Status" Text="Ready" VerticalAlignment="Center" FontWeight="SemiBold"
+                 AutomationProperties.AutomationId="Status" AutomationProperties.LiveSetting="Polite" />
+    </DockPanel>
+  </Grid>
+</Window>

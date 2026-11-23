@@ -8,4 +8,7 @@
   <Project Path="src/Porting.Core/Porting.Core.csproj">
     <Platform Project="x64" />
   </Project>
+  <Project Path="src/Porting.Desktop/Porting.Desktop.csproj">
+    <Platform Project="x64" />
+  </Project>
 </Solution>
