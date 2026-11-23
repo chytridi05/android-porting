@@ -143,6 +143,7 @@ namespace Porting.Cli
             WriteList("Companion files", inventory.Companions.Select(static file => file.ContainerPath is null
                 ? $"{file.Sha256}  {file.OriginalPath}"
                 : $"{file.Sha256}  {file.ContainerPath}!/{file.OriginalPath}").ToArray());
+            WriteRsbAttachments(inventory.RsbAttachments);
             return WriteDiagnostics(inventory.Diagnostics);
         }
 
@@ -167,7 +168,18 @@ namespace Porting.Cli
                 Console.WriteLine($"Generated project: {project}");
             }
 
+            WriteRsbAttachments(result.RsbAttachments);
             return WriteDiagnostics(result.Diagnostics);
+        }
+
+        private static void WriteRsbAttachments(IReadOnlyList<RsbAttachment> attachments)
+        {
+            foreach (RsbAttachment attachment in attachments)
+            {
+                ApkInputFile file = attachment.File;
+                string path = file.ContainerPath is string container ? $"{container}!/{file.OriginalPath}" : file.OriginalPath;
+                Console.WriteLine($"{attachment.Description}  {path}");
+            }
         }
 
         private static ApkPortOptions ReadApkPortOptions(ReadOnlySpan<string> args)

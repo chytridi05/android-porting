@@ -266,7 +266,10 @@ namespace Porting.Desktop
         private void ShowInventory(ApkInventory inventory)
         {
             IEnumerable<InventoryItem> entries = inventory.Entries.Select(static item => new InventoryItem("APK entry", item));
-            IEnumerable<InventoryItem> companions = inventory.Companions.Select(static item => new InventoryItem("Companion", item));
+            Dictionary<ApkInputFile, string> rsbDescriptions = inventory.RsbAttachments.DistinctBy(static attachment => attachment.File)
+                .ToDictionary(static attachment => attachment.File, static attachment => attachment.Description);
+            IEnumerable<InventoryItem> companions = inventory.Companions.Select(item =>
+                new InventoryItem(rsbDescriptions.GetValueOrDefault(item, "Companion"), item));
             IEnumerable<InventoryItem> splits = inventory.Splits.SelectMany(static split =>
                 split.Entries.Select(static entry => new InventoryItem("Split entry", entry)).Prepend(new("Split APK", split.File)));
             if (inventory.BaseApk is ApkInputFile baseApk)
@@ -291,6 +294,12 @@ namespace Porting.Desktop
                 ProjectPath.Text = project;
                 Workflow.SelectedItem = BuildTab;
                 details = $"Generated project: {project}\n{details}";
+            }
+            foreach (RsbAttachment attachment in result.RsbAttachments)
+            {
+                ApkInputFile file = attachment.File;
+                string path = file.ContainerPath is string container ? $"{container}!/{file.OriginalPath}" : file.OriginalPath;
+                details += $"\n{attachment.Description}  {path}";
             }
 
             Finish(result.Diagnostics, details, DiagnosticsTab);

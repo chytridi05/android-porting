@@ -182,7 +182,10 @@ public sealed class ApkProjectPorter
             "Choose a new output directory or build the existing project.", output));
 
         ApkPortResult Result() => new(recovered?.PackageName, recovered?.EntryType, recovered?.LibGdxVersion,
-            recovered?.SourceFiles.Count ?? 0, assets?.ResourceCount ?? 0, published, diagnostics.AsReadOnly());
+            recovered?.SourceFiles.Count ?? 0, assets?.ResourceCount ?? 0, published, diagnostics.AsReadOnly())
+        {
+            RsbAttachments = inventory.RsbAttachments
+        };
     }
 
     private static async Task PublishProjectAsync(string project, string output, CancellationToken cancellationToken)

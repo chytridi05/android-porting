@@ -82,10 +82,44 @@ Assert-Cli @('generate', $native, $blocked, '--obb', $loose, '--jadx', $unavaila
 )
 if (Test-Path -LiteralPath $blocked) { throw 'An unsupported APK produced a project.' }
 
+$rsb = Join-Path $root 'main.1.fixture.native.obb'
+$renamedRsb = Join-Path $root 'renamed.bin'
+$extensionlessRsb = Join-Path $nested 'bundle'
+$truncatedRsb = Join-Path $root 'truncated.obb'
+$invalidRsb = Join-Path $root 'invalid-table.obb'
+$unknownVersionRsb = Join-Path $root 'unknown-version.obb'
+$header = [byte[]]::new(0x70 + 0xCC)
+[Text.Encoding]::ASCII.GetBytes('1bsr').CopyTo($header, 0)
+[BitConverter]::GetBytes([uint32] 4).CopyTo($header, 4)
+[BitConverter]::GetBytes([uint32] $header.Length).CopyTo($header, 0x0C)
+[BitConverter]::GetBytes([uint32] 1).CopyTo($header, 0x28)
+[BitConverter]::GetBytes([uint32] 0x70).CopyTo($header, 0x2C)
+[BitConverter]::GetBytes([uint32] 0xCC).CopyTo($header, 0x30)
+foreach ($path in @($rsb, $renamedRsb, $extensionlessRsb)) {
+    [IO.File]::WriteAllBytes($path, $header)
+}
+[IO.File]::WriteAllBytes($truncatedRsb, $header[0..7])
+[BitConverter]::GetBytes([uint32]::MaxValue).CopyTo($header, 0x28)
+[IO.File]::WriteAllBytes($invalidRsb, $header)
+$header[4] = 5
+[IO.File]::WriteAllBytes($unknownVersionRsb, $header[0..7])
+$rsbHash = (Get-FileHash -LiteralPath $rsb).Hash
+Assert-Cli @('inspect', $native, '--companion', $rsb, '--companion', $renamedRsb, '--companion', $directory) 0 @(
+    "RSB v4, 1 resource groups  $rsb", "RSB v4, 1 resource groups  $renamedRsb",
+    "RSB v4, 1 resource groups  $directory!/$([IO.Path]::GetRelativePath($directory, $extensionlessRsb))"
+)
+Assert-Cli @('inspect', $native, '--companion', $truncatedRsb, '--companion', $invalidRsb, '--companion', $unknownVersionRsb) 0 @(
+    'Warning apk.rsb-header:', 'RSB v4 header is truncated', 'group table is outside', "RSB v5  $unknownVersionRsb"
+)
+Assert-Cli @('plan', $native, '--companion', $rsb, '--jadx', $unavailableJadx) 1 @(
+    "RSB v4, 1 resource groups  $rsb", 'Error apk.engine-unsupported:'
+)
+
 if ((Get-FileHash -LiteralPath $apkPath).Hash -ne $apkHash -or
     (Get-FileHash -LiteralPath $loose).Hash -ne $looseHash -or
-    (Get-FileHash -LiteralPath $extensionless).Hash -ne $extensionlessHash) {
+    (Get-FileHash -LiteralPath $extensionless).Hash -ne $extensionlessHash -or
+    (Get-FileHash -LiteralPath $rsb).Hash -ne $rsbHash) {
     throw 'Inspection changed an input file.'
 }
 
-Write-Output 'APK inventory, companion hashes, and failure diagnostics passed.'
+Write-Output 'APK inventory, RSB headers, companion hashes, and failure diagnostics passed.'

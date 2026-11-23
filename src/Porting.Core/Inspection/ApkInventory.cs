@@ -26,6 +26,9 @@ public sealed record ApkInventory(
     /// <summary>Gets the base member identity when the primary file is an APK set.</summary>
     public ApkInputFile? BaseApk { get; init; }
 
+    /// <summary>Gets the RSB headers identified among the supplied companion files.</summary>
+    public IReadOnlyList<RsbAttachment> RsbAttachments { get; init; } = [];
+
     internal string BaseLocation => BaseApk is null ? ApkPath : $"{ApkPath}!/{BaseApk.OriginalPath}";
 }
 
@@ -33,3 +36,13 @@ public sealed record ApkInventory(
 /// <param name="File">The split APK file identity.</param>
 /// <param name="Entries">The files read from the split APK.</param>
 public sealed record ApkSplitInventory(ApkInputFile File, IReadOnlyList<ApkInputFile> Entries);
+
+/// <summary>Reports an RSB header before any attempt to decode or use its resources.</summary>
+/// <param name="File">The identified companion file and its byte identity.</param>
+/// <param name="Version">The bundle version read from the header.</param>
+/// <param name="GroupCount">The declared number of resource groups when the header layout is known.</param>
+public sealed record RsbAttachment(ApkInputFile File, uint Version, uint? GroupCount)
+{
+    /// <summary>Gets a description of the header for inspection output.</summary>
+    public string Description => GroupCount is uint count ? $"RSB v{Version}, {count} resource groups" : $"RSB v{Version}";
+}

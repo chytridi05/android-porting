@@ -37,6 +37,7 @@ public sealed class ApkInspector
         List<PortDiagnostic> diagnostics = [];
         List<ApkInputFile> entries = [];
         List<ApkInputFile> companions = [];
+        List<RsbAttachment> rsbAttachments = [];
         List<ApkSplitInventory> splits = [];
         ApkInputFile? package = null;
         ApkInputFile? baseApk = null;
@@ -74,7 +75,7 @@ public sealed class ApkInspector
 
         foreach (string path in companionPaths)
         {
-            await ReadCompanionAsync(Path.GetFullPath(path), null, companions, diagnostics, cancellationToken);
+            await ReadCompanionAsync(Path.GetFullPath(path), null, companions, rsbAttachments, diagnostics, cancellationToken);
         }
 
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase) { fullApkPath };
@@ -104,7 +105,8 @@ public sealed class ApkInspector
         return new(fullApkPath, package, entries.AsReadOnly(), companions.AsReadOnly(), diagnostics.AsReadOnly())
         {
             Splits = splits.AsReadOnly(),
-            BaseApk = baseApk
+            BaseApk = baseApk,
+            RsbAttachments = rsbAttachments.AsReadOnly()
         };
     }
 
@@ -172,7 +174,7 @@ public sealed class ApkInspector
     }
 
     private static async Task ReadCompanionAsync(string path, string? root, List<ApkInputFile> files,
-        List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
+        List<RsbAttachment> rsbAttachments, List<PortDiagnostic> diagnostics, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         try
@@ -189,7 +191,7 @@ public sealed class ApkInspector
             {
                 foreach (string child in Directory.EnumerateFileSystemEntries(path).Order(StringComparer.Ordinal))
                 {
-                    await ReadCompanionAsync(child, root ?? path, files, diagnostics, cancellationToken);
+                    await ReadCompanionAsync(child, root ?? path, files, rsbAttachments, diagnostics, cancellationToken);
                 }
 
                 return;
@@ -197,7 +199,21 @@ public sealed class ApkInspector
 
             await using FileStream input = OpenFile(path);
             string originalPath = root is null ? path : Path.GetRelativePath(root, path);
-            files.Add(await ReadFileAsync(input, input.Length, originalPath, root, cancellationToken));
+            ApkInputFile file = await ReadFileAsync(input, input.Length, originalPath, root, cancellationToken);
+            files.Add(file);
+            input.Position = 0;
+            try
+            {
+                if (await RsbBundleHeader.ProbeAsync(input, cancellationToken) is RsbBundleHeader header)
+                {
+                    rsbAttachments.Add(new(file, header.Version,
+                        header.Version == RsbBundleHeader.SupportedVersion ? header.GroupCount : null));
+                }
+            }
+            catch (InvalidDataException exception)
+            {
+                diagnostics.Add(new("apk.rsb-header", DiagnosticSeverity.Warning, exception.Message, path));
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

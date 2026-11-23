@@ -69,4 +69,8 @@ public sealed record ApkPortResult(
     int SourceFiles,
     int Resources,
     string? OutputDirectory,
-    IReadOnlyList<PortDiagnostic> Diagnostics);
+    IReadOnlyList<PortDiagnostic> Diagnostics)
+{
+    /// <summary>Gets the RSB headers identified during input inspection, including for unsupported engines.</summary>
+    public IReadOnlyList<Inspection.RsbAttachment> RsbAttachments { get; init; } = [];
+}
