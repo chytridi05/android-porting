@@ -143,7 +143,7 @@ jobs:
           }
           ./tests/Test-ApkWorkflow.ps1 @parameters | Tee-Object -FilePath '.local/clean-windows-release-check/verification.log'
 
-      - name: Verify split APKs, APK sets, asset packs, loose assets, and R8 mappings
+      - name: Verify split APKs, asset packs, R8 mappings, and RSB resources
         shell: pwsh
         run: |
           $inputs = ./tests/New-AttachmentFixtures.ps1 -Bundletool $env:PORTING_TEST_BUNDLETOOL -WorkDirectory "$env:RUNNER_TEMP/attachment-fixtures"
@@ -172,5 +172,6 @@ jobs:
           path: |
             .local/clean-windows-release-check/*.log
             .local/clean-windows-attachments/*.log
+            .local/clean-windows-attachments/rsb-verification/*.log
           include-hidden-files: true
           if-no-files-found: ignore
